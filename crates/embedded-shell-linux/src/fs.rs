@@ -14,10 +14,13 @@
 //! # API shape
 //!
 //! Where a function has a direct [`std::fs`] analogue, the name and
-//! intent match it exactly ([`read_to_string`], [`read_dir`],
+//! intent match it exactly ([`read_to_string`], [`read_dir`], [`write()`],
 //! [`create_dir`], [`create_dir_all`], [`remove_file`], [`remove_dir`],
 //! [`remove_dir_all`], [`set_permissions`], [`copy`], [`rename`],
-//! [`metadata`]). Notable divergences from `std::fs`:
+//! [`metadata`], [`read_link`], [`canonicalize`]). [`symlink`] mirrors
+//! [`std::os::unix::fs::symlink`]. [`write_atomic`] has no std analogue
+//! but solves a common ops problem (no partial reads). Notable
+//! divergences from `std::fs`:
 //!
 //! - [`read_dir`] returns a `Vec<String>` of bare entry names rather
 //!   than an iterator of `DirEntry` (serial lines don't lend themselves
@@ -31,6 +34,9 @@
 //!   [`std::fs::Metadata`].
 //! - [`sha256sum`] has no `std::fs` analogue but lives here because it
 //!   wraps a coreutils tool that operates on files.
+//! - [`walk_dir`] has no `std::fs` analogue (third-party `walkdir` is
+//!   the usual std-side answer); included here because `find` on the
+//!   device covers the same need in one shell call.
 //!
 //! All paths are accepted as `impl AsRef<Path>`, so `&str`, `&Path`,
 //! `&String`, and `PathBuf` all work transparently.
@@ -47,9 +53,18 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use embedded_shell::shell::{Command, LinuxShell};
 
 use crate::error::{Error, Result};
+
+/// Hard upper bound on payload size for [`write()`] / [`write_atomic`].
+/// Larger files won't fit in a single `sh -c` invocation (ARG_MAX is
+/// ~128 KiB on Linux, smaller on busybox; after base64 expansion that
+/// caps the raw payload at ~64 KiB). Past this, use
+/// `embedded-shell-transfer` instead.
+pub const MAX_WRITE_BYTES: usize = 64 * 1024;
 
 /// Coarse file-type classification, mirroring [`std::fs::FileType`].
 ///
@@ -502,6 +517,251 @@ fn parse_stat_output(line: &str) -> Result<Metadata> {
     })
 }
 
+/// Creates a symbolic link on the device.
+///
+/// Analogue of [`std::os::unix::fs::symlink`]: argument order is
+/// `(original, link)` — the new path at `link` becomes a symbolic
+/// link pointing to `original`. Equivalent to
+/// `ln -s <original> <link>` on the device.
+///
+/// # Errors
+///
+/// - [`Error::Shell`] if `ln` exits non-zero (e.g. `link` already
+///   exists, or its parent directory isn't writable).
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::fs;
+///
+/// fs::symlink(&mut shell, "/etc/app/config.json", "/etc/app/current.json").await?;
+/// ```
+pub async fn symlink(
+    shell: &mut dyn LinuxShell,
+    original: impl AsRef<Path>,
+    link: impl AsRef<Path>,
+) -> Result<()> {
+    let original = path_arg(original.as_ref());
+    let link = path_arg(link.as_ref());
+    shell
+        .run(&Command::new("ln").arg("-s").arg(original).arg(link))
+        .await?;
+    Ok(())
+}
+
+/// Reads the target of a symbolic link.
+///
+/// Analogue of [`std::fs::read_link`]. Equivalent to `readlink <path>`
+/// (without `-f`); the returned string is the link target *as
+/// stored*, which may be relative. For the fully-resolved absolute
+/// path, use [`canonicalize`] instead.
+///
+/// # Errors
+///
+/// - [`Error::Shell`] if `readlink` exits non-zero (path doesn't
+///   exist or isn't a symlink) or isn't installed.
+///
+/// # Example
+///
+/// ```ignore
+/// let target = fs::read_link(&mut shell, "/etc/app/current.json").await?;
+/// // target == "/etc/app/config.json" (or whatever the symlink stores)
+/// ```
+pub async fn read_link(shell: &mut dyn LinuxShell, path: impl AsRef<Path>) -> Result<String> {
+    let path = path_arg(path.as_ref());
+    let r = shell.run(&Command::new("readlink").arg(path)).await?;
+    Ok(r.stdout().unwrap_or("").trim_end_matches('\n').to_string())
+}
+
+/// Returns the canonical absolute path of `path`, with all symbolic
+/// links resolved and `.`/`..` components collapsed.
+///
+/// Equivalent to `readlink -f <path>` on the device. **Diverges from
+/// [`std::fs::canonicalize`] in one notable way:** GNU `readlink -f`
+/// is willing to canonicalise a path whose *last* component doesn't
+/// exist (as long as its parent does), returning the would-be
+/// canonical path. `std::fs::canonicalize` errors in that case. If
+/// you need the strict variant, follow up with a [`metadata`] call
+/// to verify the returned path actually resolves to a file.
+///
+/// # Errors
+///
+/// - [`Error::Shell`] if `readlink` exits non-zero — typically
+///   because a parent component of `path` doesn't exist.
+/// - [`Error::Parse`] if the command returned empty output (some
+///   `readlink` implementations behave that way on completely
+///   bogus input).
+///
+/// # Example
+///
+/// ```ignore
+/// let abs = fs::canonicalize(&mut shell, "/etc/app/current.json").await?;
+/// // abs == "/etc/app/config.json" (resolved through the symlink)
+/// ```
+pub async fn canonicalize(shell: &mut dyn LinuxShell, path: impl AsRef<Path>) -> Result<String> {
+    let path = path_arg(path.as_ref());
+    let r = shell
+        .run(&Command::new("readlink").arg("-f").arg(path))
+        .await?;
+    let trimmed = r.stdout().unwrap_or("").trim_end_matches('\n').to_string();
+    if trimmed.is_empty() {
+        return Err(Error::Parse(
+            "readlink -f produced no output (path may not exist)".to_string(),
+        ));
+    }
+    Ok(trimmed)
+}
+
+/// Recursively walks `path`, returning a flat list of every entry
+/// found — files, directories, and symlinks all included.
+///
+/// Equivalent to `find <path>` on the device. Order is the same as
+/// `find`'s (effectively depth-first, but unspecified beyond that).
+/// The list includes `path` itself as the first element.
+///
+/// No direct [`std::fs`] analogue — third-party `walkdir` is what
+/// you'd reach for in std-side code. Included here because `find`
+/// solves the same problem in one shell call.
+///
+/// # Errors
+///
+/// - [`Error::Shell`] if `find` exits non-zero (e.g. permission
+///   denied on a subdirectory) or isn't installed.
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::fs;
+///
+/// let entries = fs::walk_dir(&mut shell, "/etc/app").await?;
+/// for entry in &entries {
+///     println!("{entry}");
+/// }
+/// ```
+pub async fn walk_dir(shell: &mut dyn LinuxShell, path: impl AsRef<Path>) -> Result<Vec<String>> {
+    let path = path_arg(path.as_ref());
+    let r = shell.run(&Command::new("find").arg(path)).await?;
+    Ok(r.stdout()
+        .unwrap_or("")
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Writes `contents` to `path` on the device, overwriting any
+/// existing content.
+///
+/// Analogue of [`std::fs::write`]. **Not atomic** — readers can
+/// observe a partial file while the write is in progress. Use
+/// [`write_atomic`] when readers may concurrently access `path` and
+/// you can't tolerate that.
+///
+/// Implementation: base64-encodes `contents` on the host, then runs
+/// `printf '%s' '<b64>' | base64 -d > <path>` on the device.
+/// Suitable for small payloads (config files, env files, certs).
+/// Bounded by [`MAX_WRITE_BYTES`] — larger writes return
+/// [`Error::Parse`]; use `embedded-shell-transfer` for those.
+///
+/// # Errors
+///
+/// - [`Error::Parse`] if `contents` exceeds [`MAX_WRITE_BYTES`].
+/// - [`Error::Shell`] if the device-side `printf | base64 -d > path`
+///   pipeline fails (permission denied, parent dir missing, …) or
+///   `base64` isn't installed.
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::fs;
+///
+/// fs::write(&mut shell, "/etc/app/version", b"1.2.3\n").await?;
+/// ```
+pub async fn write(
+    shell: &mut dyn LinuxShell,
+    path: impl AsRef<Path>,
+    contents: impl AsRef<[u8]>,
+) -> Result<()> {
+    let path = path_arg(path.as_ref());
+    write_to_path(shell, &path, contents.as_ref()).await
+}
+
+/// Writes `contents` to `path` atomically — readers see the old
+/// content until the moment the new content fully replaces it.
+///
+/// Writes to `<path>.tmp.<pid>` first, then `mv`s the temp into
+/// place. Since rename within one filesystem is atomic, partial
+/// reads can never happen.
+///
+/// **Same-filesystem requirement:** `mv` is only atomic when source
+/// and destination share a filesystem. If `<path>`'s parent
+/// directory lives on a different mount than where the temp file
+/// lands, `mv` falls back to copy-then-delete and the atomicity
+/// guarantee is gone. In practice this is fine — the temp file
+/// lives alongside the final path, so they share a filesystem.
+///
+/// **Cleanup on partial failure:** if the encoded write succeeds
+/// but the rename fails, a `<path>.tmp.<pid>` file remains. The
+/// next successful `write_atomic` will overwrite it; the wrapper
+/// does not retroactively clean it up.
+///
+/// Same size limits and error conditions as [`write()`].
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::fs;
+///
+/// // Update a config that other processes may be reading right now.
+/// fs::write_atomic(&mut shell, "/etc/app/config.json", new_config).await?;
+/// ```
+pub async fn write_atomic(
+    shell: &mut dyn LinuxShell,
+    path: impl AsRef<Path>,
+    contents: impl AsRef<[u8]>,
+) -> Result<()> {
+    let path = path_arg(path.as_ref());
+    let tmp = format!("{path}.tmp.{}", std::process::id());
+    write_to_path(shell, &tmp, contents.as_ref()).await?;
+    shell.run(&Command::new("mv").arg(&tmp).arg(&path)).await?;
+    Ok(())
+}
+
+async fn write_to_path(shell: &mut dyn LinuxShell, path: &str, contents: &[u8]) -> Result<()> {
+    if contents.len() > MAX_WRITE_BYTES {
+        return Err(Error::Parse(format!(
+            "{} bytes exceeds fs::write limit of {} bytes; use embedded-shell-transfer for larger payloads",
+            contents.len(),
+            MAX_WRITE_BYTES,
+        )));
+    }
+    let encoded = STANDARD.encode(contents);
+    // Base64 alphabet is shell-safe; only the path needs quoting.
+    let script = format!(
+        "printf '%s' '{}' | base64 -d > {}",
+        encoded,
+        sh_single_quote(path),
+    );
+    shell.run(&Command::new("sh").args(["-c", &script])).await?;
+    Ok(())
+}
+
+/// POSIX single-quote `s` for safe embedding in a shell command.
+/// Wraps in `'…'` and escapes any internal `'` as `'\''`.
+fn sh_single_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        if c == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
+}
+
 /// Lossy UTF-8 conversion for path arguments. Linux paths are bytes,
 /// not necessarily UTF-8; we accept replacement for the rare invalid
 /// cases rather than refuse to run.
@@ -757,5 +1017,158 @@ mod tests {
     fn parse_stat_output_rejects_short_lines() {
         let err = parse_stat_output("oops").unwrap_err();
         assert!(matches!(err, Error::Parse(_)));
+    }
+
+    #[tokio::test]
+    async fn symlink_creates_and_read_link_reads_it_back() {
+        let mut shell = SubprocessShell::new();
+        let target = temp_path("symlink-target");
+        let link = temp_path("symlink-link");
+        std::fs::write(&target, "hello").unwrap();
+        let _ = std::fs::remove_file(&link); // in case left over from a previous run
+
+        symlink(&mut shell, &target, &link).await.unwrap();
+
+        let got = read_link(&mut shell, &link).await.unwrap();
+        assert_eq!(got, target.to_string_lossy());
+
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&target);
+    }
+
+    #[tokio::test]
+    async fn canonicalize_resolves_through_symlink() {
+        let mut shell = SubprocessShell::new();
+        let target = temp_path("canon-target");
+        let link = temp_path("canon-link");
+        std::fs::write(&target, "x").unwrap();
+        let _ = std::fs::remove_file(&link);
+        symlink(&mut shell, &target, &link).await.unwrap();
+
+        let resolved = canonicalize(&mut shell, &link).await.unwrap();
+        // canonicalize follows the symlink AND resolves to the
+        // device's canonical form (e.g. /tmp → /tmp on most systems
+        // but could be /private/tmp on macOS). We assert the basename
+        // matches the target's basename rather than the whole path.
+        assert!(
+            resolved.ends_with(target.file_name().unwrap().to_str().unwrap()),
+            "canonicalize should land on the symlink target's path; got {resolved:?}"
+        );
+
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&target);
+    }
+
+    #[tokio::test]
+    async fn read_link_errors_on_non_symlink() {
+        let mut shell = SubprocessShell::new();
+        let regular = temp_path("not-a-symlink");
+        std::fs::write(&regular, "").unwrap();
+
+        let err = read_link(&mut shell, &regular).await.unwrap_err();
+        assert!(matches!(err, Error::Shell(_)));
+
+        let _ = std::fs::remove_file(&regular);
+    }
+
+    #[tokio::test]
+    async fn write_replaces_existing_file() {
+        let mut shell = SubprocessShell::new();
+        let path = temp_path("write-replace");
+        std::fs::write(&path, "old content").unwrap();
+
+        write(&mut shell, &path, b"new content").await.unwrap();
+        let got = std::fs::read(&path).unwrap();
+        assert_eq!(got, b"new content");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn write_preserves_all_byte_values() {
+        let mut shell = SubprocessShell::new();
+        let path = temp_path("write-binary");
+        let payload: Vec<u8> = (0..=255u8).collect();
+
+        write(&mut shell, &path, &payload).await.unwrap();
+        let got = std::fs::read(&path).unwrap();
+        assert_eq!(got, payload);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn write_rejects_oversized_payload() {
+        let mut shell = SubprocessShell::new();
+        let huge = vec![0u8; MAX_WRITE_BYTES + 1];
+        let err = write(&mut shell, "/tmp/should-not-be-touched", &huge)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Parse(_)));
+    }
+
+    #[tokio::test]
+    async fn write_atomic_leaves_no_tmp_on_success() {
+        let mut shell = SubprocessShell::new();
+        let path = temp_path("write-atomic");
+        let tmp_pattern = format!("{}.tmp.", path.to_string_lossy());
+
+        write_atomic(&mut shell, &path, b"final value")
+            .await
+            .unwrap();
+        let got = std::fs::read(&path).unwrap();
+        assert_eq!(got, b"final value");
+
+        // No `.tmp.<pid>` file should remain after a successful write.
+        let temp_dir = std::env::temp_dir();
+        let leftovers: Vec<_> = std::fs::read_dir(&temp_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().to_string_lossy().starts_with(&tmp_pattern))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no .tmp.<pid> files should remain, found: {leftovers:?}"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn write_handles_path_with_apostrophe() {
+        let mut shell = SubprocessShell::new();
+        let path = temp_path("dont't-break");
+        write(&mut shell, &path, b"ok").await.unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"ok");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn walk_dir_returns_recursive_tree() {
+        let mut shell = SubprocessShell::new();
+        let root = temp_path("walk_dir");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("a.txt"), "").unwrap();
+        std::fs::write(root.join("sub").join("b.txt"), "").unwrap();
+
+        let entries = walk_dir(&mut shell, &root).await.unwrap();
+        // Should include the root, the subdir, and both files (≥ 4 entries).
+        // We don't pin the count exactly because some implementations also
+        // include or omit the trailing newline / `.` entry.
+        assert!(
+            entries.iter().any(|e| e.ends_with("a.txt")),
+            "expected a.txt in {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| e.ends_with("b.txt")),
+            "expected sub/b.txt in {entries:?}"
+        );
+        assert!(
+            entries.iter().any(|e| e.ends_with("sub")),
+            "expected the sub dir in {entries:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

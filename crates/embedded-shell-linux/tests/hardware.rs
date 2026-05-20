@@ -118,6 +118,27 @@ async fn fs_copy_rename_metadata_roundtrip() {
         "{TEST_DIR} should be a directory"
     );
 
+    // Symlink ops: create a symlink, read it back, canonicalize.
+    let link_path = format!("{TEST_DIR}/link");
+    fs::symlink(&mut shell, &dst_renamed, &link_path)
+        .await
+        .expect("symlink");
+    let read = fs::read_link(&mut shell, &link_path)
+        .await
+        .expect("read_link");
+    assert_eq!(read, dst_renamed, "read_link should round-trip target");
+    let canon = fs::canonicalize(&mut shell, &link_path)
+        .await
+        .expect("canonicalize");
+    eprintln!("[hw] canonicalize({link_path}) -> {canon}");
+    assert!(canon.ends_with("renamed.txt"));
+
+    // Recursive walk should see the test dir + the file + the symlink.
+    let entries = fs::walk_dir(&mut shell, TEST_DIR).await.expect("walk_dir");
+    eprintln!("[hw] walk_dir({TEST_DIR}) -> {entries:?}");
+    assert!(entries.iter().any(|e| e.ends_with("renamed.txt")));
+    assert!(entries.iter().any(|e| e.ends_with("/link")));
+
     // Clean up.
     fs::remove_dir_all(&mut shell, TEST_DIR)
         .await
