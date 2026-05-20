@@ -605,9 +605,19 @@ impl LinuxSerialShell {
 
         let started = Utc::now();
         self.transport.write_bytes(framed.as_bytes()).await?;
+        // `initial` covers the silent-execution phase (`timeout(1)` is
+        // running; the device hasn't started catting yet). `idle`
+        // covers the cat phase — once any byte arrives, we keep
+        // listening as long as the device keeps streaming. This is
+        // how we avoid declaring a busy `journalctl` dump dead just
+        // because the wall clock ran out.
         let response = self
             .transport
-            .read_until(triple_sentinel, timeout + Duration::from_secs(2))
+            .read_until_progressive(
+                triple_sentinel,
+                timeout + Duration::from_secs(2),
+                Duration::from_secs(5),
+            )
             .await?;
 
         let (exit_code, stdout, stderr) = parse_framed_response(&response)?;

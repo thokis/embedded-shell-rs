@@ -160,6 +160,72 @@ impl SerialTransport {
         }
     }
 
+    /// Read bytes until `predicate` returns `Some(end)`, using two
+    /// independent deadlines:
+    ///
+    /// - `initial`: total time allowed before the **first** byte arrives.
+    ///   Counted from now; matches what a single-shot `read_until` would
+    ///   wait when the line is silent.
+    /// - `idle`: max gap between consecutive byte chunks once data has
+    ///   started flowing. Reset on every chunk, so a steady stream
+    ///   keeps the read alive indefinitely.
+    ///
+    /// This matters for framed-exec on serial: the device is silent
+    /// while the user's command runs (`initial`), then dumps output in
+    /// chunks via `cat` (`idle` between chunks). A wall-clock deadline
+    /// can't accommodate both phases — silent execution looks identical
+    /// to a hung device, and a large output stream looks identical to a
+    /// stalled one. Idle-after-first-byte covers both.
+    ///
+    /// Errors with [`ShellError::ReadTimeout`] on either deadline.
+    /// `[..end]` is returned on success; anything past `end` stays
+    /// buffered for the next call.
+    pub(crate) async fn read_until_progressive<F>(
+        &mut self,
+        predicate: F,
+        initial: Duration,
+        idle: Duration,
+    ) -> Result<Vec<u8>, ShellError>
+    where
+        F: Fn(&[u8]) -> Option<usize>,
+    {
+        let initial_deadline = Instant::now() + initial;
+        let mut last_byte: Option<Instant> = None;
+        loop {
+            if let Some(end) = predicate(&self.pending) {
+                let result: Vec<u8> = self.pending.drain(..end).collect();
+                return Ok(result);
+            }
+            let deadline = match last_byte {
+                None => initial_deadline,
+                Some(last) => last + idle,
+            };
+            let now = Instant::now();
+            if now >= deadline {
+                let duration = if last_byte.is_some() { idle } else { initial };
+                return Err(ShellError::ReadTimeout {
+                    duration,
+                    captured: std::mem::take(&mut self.pending),
+                });
+            }
+            let remaining = deadline.saturating_duration_since(now);
+            match tokio::time::timeout(remaining, self.rx.recv()).await {
+                Ok(Some(chunk)) => {
+                    self.pending.extend_from_slice(&chunk);
+                    last_byte = Some(Instant::now());
+                }
+                Ok(None) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()),
+                Err(_) => {
+                    let duration = if last_byte.is_some() { idle } else { initial };
+                    return Err(ShellError::ReadTimeout {
+                        duration,
+                        captured: std::mem::take(&mut self.pending),
+                    });
+                }
+            }
+        }
+    }
+
     /// Best-effort drain: collect whatever bytes are available within `grace`,
     /// returning them. Used to flush leftover output between commands.
     pub(crate) async fn drain(&mut self, grace: Duration) -> Vec<u8> {
@@ -386,6 +452,68 @@ mod tests {
         match err {
             ShellError::ReadTimeout { captured, .. } => {
                 assert_eq!(captured, b"some garbage but no prompt");
+            }
+            other => panic!("expected ReadTimeout, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn read_until_progressive_succeeds_under_steady_stream() {
+        // The device dribbles bytes in 50ms intervals over 600ms — total
+        // wall-clock would beat a 100ms idle, but per-chunk gaps don't.
+        let (mut t, mut device) = pair();
+        tokio::spawn(async move {
+            for _ in 0..6 {
+                device.write_all(b"...").await.unwrap();
+                device.flush().await.unwrap();
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            device.write_all(b"login: ").await.unwrap();
+        });
+        let result = t
+            .read_until_progressive(
+                prompts::find_linux_login,
+                Duration::from_millis(100),
+                Duration::from_millis(200),
+            )
+            .await
+            .unwrap();
+        assert!(result.ends_with(b"login: "));
+    }
+
+    #[tokio::test]
+    async fn read_until_progressive_times_out_on_initial_silence() {
+        // No bytes at all — should hit the initial deadline.
+        let (mut t, _device) = pair();
+        let err = t
+            .read_until_progressive(
+                prompts::find_linux_login,
+                Duration::from_millis(80),
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ShellError::ReadTimeout { .. }));
+    }
+
+    #[tokio::test]
+    async fn read_until_progressive_times_out_on_idle_after_burst() {
+        // A burst arrives, then the device goes silent for longer than
+        // the idle deadline. We should fail on idle.
+        let (mut t, mut device) = pair();
+        device.write_all(b"hi ").await.unwrap();
+        device.flush().await.unwrap();
+        let err = t
+            .read_until_progressive(
+                prompts::find_linux_login,
+                Duration::from_secs(5),
+                Duration::from_millis(100),
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ShellError::ReadTimeout { captured, .. } => {
+                assert_eq!(captured, b"hi ");
             }
             other => panic!("expected ReadTimeout, got {other:?}"),
         }

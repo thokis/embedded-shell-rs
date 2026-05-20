@@ -325,9 +325,16 @@ impl UBootSerialShell {
 
         let started = Utc::now();
         self.transport.write_bytes(framed.as_bytes()).await?;
+        // Same idle-after-first-byte rationale as the Linux shell —
+        // U-Boot's `tftp`/`loady` can stream for many seconds while
+        // remaining responsive.
         let response = self
             .transport
-            .read_until(uboot_returncode_end, command.timeout_duration())
+            .read_until_progressive(
+                uboot_returncode_end,
+                command.timeout_duration(),
+                Duration::from_secs(5),
+            )
             .await?;
 
         let (exit_code, stdout) = parse_uboot_response(&response)?;
