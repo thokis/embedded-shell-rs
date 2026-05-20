@@ -123,22 +123,21 @@ pub async fn run(args: InfoArgs, port: Option<&str>, password: Option<&str>) -> 
         println!();
     } else {
         let use_color = std::io::stdout().is_terminal();
-        render_pretty(&info, port.is_some(), use_color);
+        render_pretty(&info, port, use_color);
     }
     Ok(ExitCode::SUCCESS)
 }
 
-fn render_pretty(info: &DeviceInfo, via_serial: bool, use_color: bool) {
+fn render_pretty(info: &DeviceInfo, port: Option<&str>, use_color: bool) {
     // Pad the longest label (`Hostname` = 8 chars) with a 3-char gap
     // so values align in their columns within each section.
     const LABEL_PAD: usize = 11;
 
     // Title = device's own hostname. When connected via serial,
-    // suffix `(device)` to disambiguate from the local host.
-    let title = if via_serial {
-        format!("{} (device)", info.hostname)
-    } else {
-        info.hostname.clone()
+    // append the port path so it's obvious which device this is.
+    let title = match port {
+        Some(p) => format!("{} ({})", info.hostname, p),
+        None => info.hostname.clone(),
     };
     println!();
     println!("{}", bold(&title, use_color));
