@@ -24,7 +24,7 @@ cargo install --path crates/eshell
 | `eshell service PORT UNIT <action>` | Systemd unit control. `<action>` is one of `status` / `start` / `stop` / `restart` / `reload` / `enable` / `disable`. `status` returns structured info (and exits 3 if not active, mirroring `systemctl is-active`); `--json` for the status flavor. |
 | `eshell services PORT [--pattern P] [--failed-only] [--json]` | Tabular listing of systemd units. Default shows every active unit; `--pattern '*.service'` to filter, `--failed-only` to show just the broken ones. |
 | `eshell journal PORT [--unit U] [-n N] [--since EXPR] [--json]` | Tail the systemd journal. Filters compose: `--unit foo --since "1 hour ago"` gives that unit's last hour. Default is the last 50 entries from everything. `--json` emits JSONL. |
-| `eshell modem PORT [INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. `INDEX` defaults to `0`. `--no-sim` skips the SIM lookup (faster, doesn't error if no SIM is inserted). |
+| `eshell modem PORT [-m INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. Without `-m`, the first modem mmcli reports is used; pass `-m 1` (etc.) on multi-modem devices. `--no-sim` skips the SIM lookup. |
 | `eshell network PORT [--json]` | Comprehensive network state: kernel-view (`ip -j` links/addresses/routes) and NM-view (`nmcli` connections) side by side. Gracefully degrades to NM-only on devices whose `ip` lacks JSON support. |
 
 `PORT` is always the device's serial port (e.g. `/dev/ttyUSB0`).

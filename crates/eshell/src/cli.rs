@@ -219,10 +219,11 @@ pub struct NetworkArgs {
 pub struct ModemArgs {
     #[command(flatten)]
     pub common: Common,
-    /// Modem index from `mmcli -L`. Default 0 — fine on the typical
-    /// single-modem device.
-    #[arg(default_value_t = 0)]
-    pub index: u32,
+    /// Modem index from `mmcli -L`. Without this flag, the first
+    /// modem ModemManager knows about is used (or the command errors
+    /// out clearly if there are none).
+    #[arg(short = 'm', long = "modem")]
+    pub index: Option<u32>,
     /// Skip the SIM lookup (faster, and avoids erroring when no
     /// SIM is inserted).
     #[arg(long)]
