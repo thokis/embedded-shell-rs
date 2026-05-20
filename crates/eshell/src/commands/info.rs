@@ -42,11 +42,15 @@ pub async fn run(args: InfoArgs, password: Option<&str>) -> Result<ExitCode> {
             .await?
             .stdout(),
     );
-    let ipv4 = first_line_of(
+    // Trim down `ip -o addr` to just `iface: addr/prefix` per line on
+    // the device side so we don't have to parse all the columns. awk
+    // gives portable behaviour across busybox and GNU `ip`.
+    let ipv4 = format_ipv4(
         shell
             .run(&Command::new("sh").args([
                 "-c",
-                "ip -4 -o addr show scope global 2>/dev/null || hostname -I 2>/dev/null",
+                "ip -4 -o addr show scope global 2>/dev/null | awk '{print $2 \"=\" $4}' \
+                 || hostname -I 2>/dev/null",
             ]))
             .await?
             .stdout(),
@@ -95,4 +99,26 @@ fn first_line_of(s: Option<&str>) -> String {
         .unwrap_or("")
         .trim()
         .to_string()
+}
+
+/// Collapses the device-side `ip -o addr` output (one `iface=addr/prefix`
+/// per line) into a single comma-separated string for display.
+/// Falls through to the raw output if the format doesn't match the
+/// expected shape (e.g. `hostname -I` fallback path on devices that
+/// don't have `ip`).
+fn format_ipv4(s: Option<&str>) -> String {
+    let raw = s.unwrap_or("").trim();
+    if raw.is_empty() {
+        return "(none)".to_string();
+    }
+    // Lines from the awk pipeline look like `eth0=192.168.1.5/24`;
+    // lines from `hostname -I` look like `192.168.1.5 10.0.0.5`.
+    if raw.contains('=') {
+        raw.lines()
+            .map(|l| l.replace('=', ": "))
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        raw.split_whitespace().collect::<Vec<_>>().join(", ")
+    }
 }
