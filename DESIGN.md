@@ -680,6 +680,62 @@ LinuxShell` is not satisfied".
 
 ---
 
+## D-017 — Framed exec uses idle-after-first-byte read timeout
+
+**Decision:** `LinuxSerialShell::exec_framed` and
+`UBootSerialShell::exec_framed` read the framed response via
+`SerialTransport::read_until_progressive(predicate, initial, idle)`
+rather than a single wall-clock `read_until(predicate, deadline)`.
+The `initial` deadline covers the silent-execution phase (the user's
+command is running, device hasn't started catting `/tmp/out` yet);
+the `idle` deadline covers the streaming phase — once any byte
+arrives, the deadline resets on every chunk, so a steady stream of
+output keeps the read alive indefinitely. Currently `initial =
+command.timeout + 2s` and `idle = 5s` on both shells.
+
+**Context:** The original `read_until(predicate, timeout + 2s)` used
+a single wall-clock deadline. For output-heavy commands like
+`journalctl` on a busy device, the protocol legitimately needs many
+seconds to dump the captured `/tmp/out` over a 115 200-baud line —
+even though the device is steadily writing bytes the whole time. The
+host would declare the transport dead at 7 s and escalate to a full
+re-activate, which then frequently failed because the device was
+still mid-dump. The user found this on their first real REPL
+session.
+
+**Alternatives considered:**
+
+- Just bump the wall-clock cap (e.g. `timeout + 30s`). Rejected:
+  inflates the upper-bound failure latency for short commands and
+  doesn't address the symptom — a slow, large `cat` still hits the
+  cap if the file is big enough.
+- Switch to streaming framing (per-line tagged frames). Rejected:
+  larger protocol change with its own caveats (line-buffer
+  prerequisite, busybox edge cases). The async-first imperative
+  driver doesn't need real-time streaming; it needs not to time
+  out while bytes are flowing.
+- Use a heartbeat from the device. Rejected: requires device-side
+  cooperation; multiple shell families would each need a heartbeat
+  convention.
+
+**Consequences:**
+
+- `Shell::run()` no longer times out when the device is steadily
+  producing output, even if the *total* time exceeds the wall-clock
+  cap of the old `read_until`.
+- Worst-case latency when a command genuinely hangs is now
+  `initial + idle` (≈ timeout + 7 s) instead of `timeout + 2 s`.
+  A small slip; the new behaviour is correct rather than tight.
+- `SerialTransport::read_until` (the wall-clock version) stays in
+  place — `LinuxSerialShell::activate` and similar prompt-detection
+  flows want wall-clock semantics because they shouldn't accept
+  "device is still spewing kernel chatter" as a sign of liveness.
+- Three new unit tests in `serial.rs` pin the new method's
+  behaviour (succeeds under steady stream, times out on initial
+  silence, times out on idle after a burst).
+
+---
+
 ## D-099 — `embedded-shell-transfer` crate (push/fetch, multi-transport)
 
 **Decision:** A third workspace crate for file push/fetch, implementing
@@ -777,6 +833,8 @@ wrappers.
   a feature addition, not a breaking change.
 - All wrappers take `&mut dyn LinuxShell` (see D-016), excluding
   `UBootSerialShell` at compile time.
-- Implementation status: `fs` module (coreutils-gated) is implemented;
-  other modules (`iputils`, `systemd`, `networkmanager`, `modemmanager`,
-  `iproute2`) are feature-gated and currently empty stubs.
+- Implementation status: all wrapper modules (`fs`, `iputils`,
+  `systemd`, `journalctl`, `iproute2`, `networkmanager`, `modemmanager`)
+  are implemented and exercised by both in-process unit tests and
+  opt-in hardware tests. Each crate feature documented in the
+  per-crate README under `crates/embedded-shell-linux`.

@@ -44,7 +44,7 @@ ergonomic shortcut. You'll get a clear error if you try.
 | `eshell ping TARGET [--count N] [--json]` | Ping `TARGET` from the device. Exits 1 on total loss so scripts can branch. |
 | `eshell reboot` | Reboot the device, wait for it to come back. Reports how long that took. |
 | `eshell service UNIT <action>` | Systemd unit control. `<action>` is one of `status` / `start` / `stop` / `restart` / `reload` / `enable` / `disable`. `status` returns structured info (and exits 3 if not active, mirroring `systemctl is-active`); `--json` for the status flavor. |
-| `eshell services [--pattern P] [--failed-only] [--json]` | Tabular listing of systemd units. Default shows every active unit; `--pattern '*.service'` to filter, `--failed-only` to show just the broken ones. |
+| `eshell services [--pattern P] [--failed-only] [--json]` | systemd units grouped by active state (`Failed` first, then `Active`, etc.) with one glyph per state. Default pattern is `*.service`; pass `--pattern '*'` to include every unit type. `--failed-only` shortcut for the broken ones. |
 | `eshell journal [--unit U] [-n N] [--since EXPR] [--json]` | Tail the systemd journal. Filters compose: `--unit foo --since "1 hour ago"` gives that unit's last hour. Default is the last 50 entries from everything. `--json` emits JSONL. |
 | `eshell modem [-m INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. Without `-m`, the first modem mmcli reports is used; pass `-m 1` (etc.) on multi-modem devices. `--no-sim` skips the SIM lookup. |
 | `eshell network [--json]` | Comprehensive network state: kernel-view (`ip -j` links/addresses/routes) and NM-view (`nmcli` connections) side by side. Gracefully degrades to NM-only on devices whose `ip` lacks JSON support. |

@@ -205,15 +205,16 @@ embedded-shell-rs/                    ← workspace root
                 ├── exec.rs
                 ├── push.rs            ← HTTP-first with serial fallback
                 ├── pull.rs            ← HTTP-first with serial fallback
-                ├── info.rs
+                ├── info.rs            ← sectioned summary (System/Storage/Interfaces)
                 ├── ping.rs
                 ├── reboot.rs
                 ├── service.rs         ← single systemd unit (status / start / …)
-                ├── services.rs        ← tabular `systemctl list-units`
+                ├── services.rs        ← units grouped by active state (`Failed`/`Active`/…)
                 ├── journal.rs         ← `journalctl` tail / since / unit
                 ├── modem.rs           ← `mmcli` modem + SIM details
                 ├── network.rs         ← combined iproute2 + NetworkManager view
-                └── repl.rs            ← rustyline-backed interactive REPL
+                ├── repl.rs            ← rustyline-backed interactive REPL
+                └── completions.rs    ← shell-completion script generation
 ```
 
 ## Planned work in this workspace
@@ -225,10 +226,17 @@ embedded-shell-rs/                    ← workspace root
 - **`embedded-shell-uboot` crate** (speculative): U-Boot-specific
   wrappers (`printenv`, `setenv`, `tftpboot`, `loady`/`loadb`) behind a
   `UBootShell` marker trait, mirroring the `LinuxShell` pattern.
-- **Polish across existing wrapper modules**: `systemd::list_units`
-  (structured), `journalctl::since` (time-window filter),
-  `networkmanager::wifi_list`, `modemmanager::sim` (SIM details). Each
-  small.
+- **CLI output polish across remaining commands.** `info` and
+  `services` have a sectioned/parsed layout; `journal`, `network`, and
+  `modem` still need similar treatment (parsed values, structured JSON,
+  TTY-aware coloring).
+- **REPL polish bundle.** `\cd <dir>` for stateful per-session cwd,
+  `\reconnect` for transport recovery, graceful Ctrl-C exit instead of
+  SIGINT-killing the process.
+- **Publishing prep.** Cargo.toml metadata audit, `CHANGELOG.md`,
+  `cargo publish --dry-run` per crate to surface blockers before 0.1.
+- **Polish across existing wrapper modules**: `networkmanager::wifi_list`,
+  `modemmanager::sim` (SIM details). Each small.
 
 ## What does *not* live in this repo
 

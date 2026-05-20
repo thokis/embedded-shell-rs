@@ -187,8 +187,8 @@ pub struct JournalArgs {
 
 #[derive(Args)]
 pub struct ServicesArgs {
-    /// Glob pattern to filter by (e.g. `*.service`, `nginx*`).
-    /// Without this, every loaded service-class unit is listed.
+    /// Glob pattern to filter by. Default: `*.service` (services only).
+    /// Pass `*` to include every unit (mounts, slices, devices, etc.).
     #[arg(long)]
     pub pattern: Option<String>,
     /// Only show units in the `failed` state.
