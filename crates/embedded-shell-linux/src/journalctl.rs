@@ -135,7 +135,7 @@ pub struct LogEntry {
 /// ```
 pub async fn tail(shell: &mut dyn LinuxShell, count: u32) -> Result<Vec<LogEntry>> {
     let output = run_journalctl_json(shell, &["-n", &count.to_string()]).await?;
-    parse_jsonl(&output)
+    parse_json_seq(&output)
 }
 
 /// Returns the last `count` journal entries from one systemd unit,
@@ -161,7 +161,7 @@ pub async fn tail_unit(
     count: u32,
 ) -> Result<Vec<LogEntry>> {
     let output = run_journalctl_json(shell, &["-u", unit, "-n", &count.to_string()]).await?;
-    parse_jsonl(&output)
+    parse_json_seq(&output)
 }
 
 /// Returns every journal entry since `since`, regardless of source.
@@ -188,7 +188,7 @@ pub async fn tail_unit(
 /// ```
 pub async fn tail_since(shell: &mut dyn LinuxShell, since: &str) -> Result<Vec<LogEntry>> {
     let output = run_journalctl_json(shell, &["--since", since]).await?;
-    parse_jsonl(&output)
+    parse_json_seq(&output)
 }
 
 /// Returns journal entries from one systemd unit since `since`.
@@ -211,13 +211,19 @@ pub async fn tail_unit_since(
     since: &str,
 ) -> Result<Vec<LogEntry>> {
     let output = run_journalctl_json(shell, &["-u", unit, "--since", since]).await?;
-    parse_jsonl(&output)
+    parse_json_seq(&output)
 }
 
 async fn run_journalctl_json(shell: &mut dyn LinuxShell, extra_args: &[&str]) -> Result<String> {
+    // `-o json-seq` is RFC 7464: each record prefixed with `\x1e`
+    // (record separator) and terminated by `\n`. Critically it
+    // *does* escape newlines inside string values — `-o json` does
+    // not, which breaks line-based parsing on multi-line log
+    // messages (e.g. pretty-printed Debug output that spans
+    // several lines).
     let mut cmd = Command::new("journalctl")
         .arg("-o")
-        .arg("json")
+        .arg("json-seq")
         .arg("--no-pager");
     for a in extra_args {
         cmd = cmd.arg(*a);
@@ -226,14 +232,18 @@ async fn run_journalctl_json(shell: &mut dyn LinuxShell, extra_args: &[&str]) ->
     Ok(r.stdout().unwrap_or("").to_string())
 }
 
-fn parse_jsonl(output: &str) -> Result<Vec<LogEntry>> {
+fn parse_json_seq(output: &str) -> Result<Vec<LogEntry>> {
+    // Records separated by 0x1e (Record Separator). The first split
+    // chunk is empty (output starts with \x1e); subsequent chunks
+    // each contain one JSON object followed by an optional newline.
     let mut out = Vec::new();
-    for line in output.lines() {
-        if line.trim().is_empty() {
+    for record in output.split('\x1e') {
+        let record = record.trim();
+        if record.is_empty() {
             continue;
         }
-        let raw: RawEntry = serde_json::from_str(line)
-            .map_err(|e| Error::Parse(format!("journalctl json: {e}; line {line:?}")))?;
+        let raw: RawEntry = serde_json::from_str(record)
+            .map_err(|e| Error::Parse(format!("journalctl json: {e}; record {record:?}")))?;
         out.push(LogEntry::from_raw(raw)?);
     }
     Ok(out)
@@ -314,18 +324,21 @@ impl LogEntry {
 mod tests {
     use super::*;
 
-    const SAMPLE_JSONL: &str = concat!(
+    // `-o json-seq` framing: each record prefixed with 0x1e and
+    // terminated by 0x0a (RFC 7464).
+    const SAMPLE_JSON_SEQ: &str = concat!(
+        "\x1e",
         r#"{"__REALTIME_TIMESTAMP":"1700000000123456","PRIORITY":"6","_SYSTEMD_UNIT":"sshd.service","_HOSTNAME":"router","_PID":"1234","SYSLOG_IDENTIFIER":"sshd","_COMM":"sshd","MESSAGE":"Accepted publickey for thomas"}"#,
-        "\n",
+        "\n\x1e",
         r#"{"__REALTIME_TIMESTAMP":"1700000001000000","PRIORITY":"3","_SYSTEMD_UNIT":"foo.service","_HOSTNAME":"router","MESSAGE":"connection refused"}"#,
-        "\n",
+        "\n\x1e",
         r#"{"__REALTIME_TIMESTAMP":"1700000002500000","_HOSTNAME":"router","MESSAGE":"kernel: net eth0 link up"}"#,
         "\n",
     );
 
     #[test]
-    fn parses_jsonl_output() {
-        let entries = parse_jsonl(SAMPLE_JSONL).unwrap();
+    fn parses_json_seq_output() {
+        let entries = parse_json_seq(SAMPLE_JSON_SEQ).unwrap();
         assert_eq!(entries.len(), 3);
 
         let sshd = &entries[0];
@@ -348,7 +361,7 @@ mod tests {
 
     #[test]
     fn timestamps_round_trip_via_unix_epoch() {
-        let entries = parse_jsonl(SAMPLE_JSONL).unwrap();
+        let entries = parse_json_seq(SAMPLE_JSON_SEQ).unwrap();
         let first = &entries[0];
         let dur = first.timestamp.duration_since(UNIX_EPOCH).unwrap();
         // 1700000000123456 microseconds since epoch
@@ -375,23 +388,43 @@ mod tests {
 
     #[test]
     fn handles_message_as_byte_array() {
-        let line = r#"{"__REALTIME_TIMESTAMP":"1700000000000000","MESSAGE":[104,105,33]}"#;
-        let entries = parse_jsonl(line).unwrap();
+        let input =
+            "\x1e{\"__REALTIME_TIMESTAMP\":\"1700000000000000\",\"MESSAGE\":[104,105,33]}\n";
+        let entries = parse_json_seq(input).unwrap();
         assert_eq!(entries[0].message, "hi!");
     }
 
     #[test]
     fn rejects_garbage_timestamp() {
-        let line = r#"{"__REALTIME_TIMESTAMP":"not-a-number","MESSAGE":"foo"}"#;
-        let err = parse_jsonl(line).unwrap_err();
+        let input = "\x1e{\"__REALTIME_TIMESTAMP\":\"not-a-number\",\"MESSAGE\":\"foo\"}\n";
+        let err = parse_json_seq(input).unwrap_err();
         assert!(matches!(err, Error::Parse(_)));
     }
 
     #[test]
-    fn skips_blank_lines() {
-        let input = format!("\n\n{SAMPLE_JSONL}\n");
-        let entries = parse_jsonl(&input).unwrap();
+    fn skips_empty_records() {
+        // Leading newlines and a trailing RS-without-payload should
+        // all be tolerated.
+        let input = format!("\n\n{SAMPLE_JSON_SEQ}\x1e");
+        let entries = parse_json_seq(&input).unwrap();
         assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
+    fn parses_message_with_escaped_newline() {
+        // Regression: `-o json-seq` correctly escapes literal newlines
+        // inside string values as `\n`, so multi-line log messages
+        // (e.g. pretty-printed Debug output) parse cleanly. The old
+        // `-o json` format emitted raw \x0a inside the string and
+        // broke line-based parsing.
+        let input = "\x1e{\"__REALTIME_TIMESTAMP\":\"1700000000000000\",\
+                     \"MESSAGE\":\"State change ConnectionState {\\n    state: Connected,\\n    addr: 1.2.3.4,\\n}\"}\n";
+        let entries = parse_json_seq(input).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].message.contains("State change"));
+        assert!(entries[0].message.contains("Connected"));
+        // Verify the embedded newlines came through.
+        assert_eq!(entries[0].message.lines().count(), 4);
     }
 
     fn host_can_read_journal() -> bool {
