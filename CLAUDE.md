@@ -226,10 +226,10 @@ embedded-shell-rs/                    ← workspace root
 - **`embedded-shell-uboot` crate** (speculative): U-Boot-specific
   wrappers (`printenv`, `setenv`, `tftpboot`, `loady`/`loadb`) behind a
   `UBootShell` marker trait, mirroring the `LinuxShell` pattern.
-- **CLI output polish across remaining commands.** `info` and
-  `services` have a sectioned/parsed layout; `journal`, `network`, and
-  `modem` still need similar treatment (parsed values, structured JSON,
-  TTY-aware coloring).
+- **CLI output polish across remaining commands.** `info`, `services`,
+  and `journal` have polished output; `network` and `modem` still need
+  similar treatment (parsed values, structured JSON, TTY-aware
+  coloring).
 - **REPL polish bundle.** `\cd <dir>` for stateful per-session cwd,
   `\reconnect` for transport recovery, graceful Ctrl-C exit instead of
   SIGINT-killing the process.
