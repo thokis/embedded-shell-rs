@@ -21,6 +21,9 @@ cargo install --path crates/eshell
 | `eshell info PORT [--json]` | Pretty-prints OS, kernel, uptime, memory, root-fs usage, IPv4. |
 | `eshell ping PORT TARGET [--count N] [--json]` | Ping `TARGET` from the device. Exits 1 on total loss so scripts can branch. |
 | `eshell reboot PORT` | Reboot the device, wait for it to come back. Reports how long that took. |
+| `eshell service PORT UNIT <action>` | Systemd unit control. `<action>` is one of `status` / `start` / `stop` / `restart` / `reload` / `enable` / `disable`. `status` returns structured info (and exits 3 if not active, mirroring `systemctl is-active`); `--json` for the status flavor. |
+| `eshell journal PORT [--unit U] [-n N] [--since EXPR] [--json]` | Tail the systemd journal. Filters compose: `--unit foo --since "1 hour ago"` gives that unit's last hour. Default is the last 50 entries from everything. `--json` emits JSONL. |
+| `eshell modem PORT [INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. `INDEX` defaults to `0`. `--no-sim` skips the SIM lookup (faster, doesn't error if no SIM is inserted). |
 
 `PORT` is always the device's serial port (e.g. `/dev/ttyUSB0`).
 
@@ -93,6 +96,16 @@ fi
 
 # Reboot and verify it comes back
 eshell reboot /dev/ttyUSB0
+
+# Check a service, then restart it
+eshell service /dev/ttyUSB0 sshd.service status
+eshell service /dev/ttyUSB0 sshd.service restart
+
+# Last hour of logs from one unit, JSONL for pipeline use
+eshell journal /dev/ttyUSB0 --unit sshd.service --since "1 hour ago" --json | jq .
+
+# Modem inventory — pipeline-friendly JSON
+eshell modem /dev/ttyUSB0 --json | jq '{model, signal_quality, operator: .operator_name}'
 ```
 
 ## Exit codes
