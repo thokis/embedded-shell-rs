@@ -51,8 +51,12 @@ struct ConnectionReport {
     device: Option<String>,
 }
 
-pub async fn run(args: NetworkArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+pub async fn run(
+    args: NetworkArgs,
+    port: Option<&str>,
+    password: Option<&str>,
+) -> Result<ExitCode> {
+    let mut shell = open_linux(port, password).await?;
 
     // iproute2 requires `ip -j` JSON support on the device; older
     // busybox builds don't have it. Treat any iproute2 failure as
@@ -115,10 +119,7 @@ pub async fn run(args: NetworkArgs, password: Option<&str>) -> Result<ExitCode> 
         return Ok(ExitCode::SUCCESS);
     }
 
-    println!(
-        "==== Network state ({}) ====\n",
-        args.common.port.as_deref().unwrap_or("local")
-    );
+    println!("==== Network state ({}) ====\n", port.unwrap_or("local"));
 
     if report.links.is_empty() {
         println!("Kernel view (iproute2): unavailable — device's `ip` lacks JSON support.\n");

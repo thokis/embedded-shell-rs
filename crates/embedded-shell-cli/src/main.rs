@@ -17,20 +17,21 @@ use crate::cli::{Cli, Command};
 async fn main() -> ExitCode {
     init_tracing();
     let cli = Cli::parse();
+    let port = cli.port.as_deref();
     let password = cli.password.as_deref();
 
     let result = match cli.command {
-        Command::Exec(args) => commands::exec::run(args, password).await,
-        Command::Push(args) => commands::push::run(args, password).await,
-        Command::Pull(args) => commands::pull::run(args, password).await,
-        Command::Info(args) => commands::info::run(args, password).await,
-        Command::Ping(args) => commands::ping::run(args, password).await,
-        Command::Reboot(args) => commands::reboot::run(args, password).await,
-        Command::Service(args) => commands::service::run(args, password).await,
-        Command::Services(args) => commands::services::run(args, password).await,
-        Command::Journal(args) => commands::journal::run(args, password).await,
-        Command::Modem(args) => commands::modem::run(args, password).await,
-        Command::Network(args) => commands::network::run(args, password).await,
+        Command::Exec(args) => commands::exec::run(args, port, password).await,
+        Command::Push(args) => commands::push::run(args, port, password).await,
+        Command::Pull(args) => commands::pull::run(args, port, password).await,
+        Command::Info(args) => commands::info::run(args, port, password).await,
+        Command::Ping(args) => commands::ping::run(args, port, password).await,
+        Command::Reboot(args) => commands::reboot::run(args, port, password).await,
+        Command::Service(args) => commands::service::run(args, port, password).await,
+        Command::Services(args) => commands::services::run(args, port, password).await,
+        Command::Journal(args) => commands::journal::run(args, port, password).await,
+        Command::Modem(args) => commands::modem::run(args, port, password).await,
+        Command::Network(args) => commands::network::run(args, port, password).await,
     };
 
     match result {

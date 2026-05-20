@@ -19,8 +19,8 @@ struct ExecReport<'a> {
     duration_ms: i64,
 }
 
-pub async fn run(args: ExecArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+pub async fn run(args: ExecArgs, port: Option<&str>, password: Option<&str>) -> Result<ExitCode> {
+    let mut shell = open_linux(port, password).await?;
 
     let mut iter = args.argv.into_iter();
     let head = iter

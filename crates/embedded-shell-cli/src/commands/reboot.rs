@@ -9,8 +9,12 @@ use embedded_shell::shell::Shell;
 use crate::cli::RebootArgs;
 use crate::shell::open_serial;
 
-pub async fn run(args: RebootArgs, password: Option<&str>) -> Result<ExitCode> {
-    let port = args.common.port.as_deref().ok_or_else(|| {
+pub async fn run(
+    _args: RebootArgs,
+    port: Option<&str>,
+    password: Option<&str>,
+) -> Result<ExitCode> {
+    let port = port.ok_or_else(|| {
         anyhow!("reboot requires an explicit serial port (refusing to reboot the local host)")
     })?;
     let mut shell = open_serial(port, password).await?;

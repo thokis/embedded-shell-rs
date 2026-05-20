@@ -9,8 +9,8 @@ use embedded_shell_transfer::{TransferError, http, serial};
 use crate::cli::{PushArgs, Transport};
 use crate::shell::open_linux;
 
-pub async fn run(args: PushArgs, password: Option<&str>) -> Result<ExitCode> {
-    let port = args.common.port.as_deref().ok_or_else(|| {
+pub async fn run(args: PushArgs, port: Option<&str>, password: Option<&str>) -> Result<ExitCode> {
+    let port = port.ok_or_else(|| {
         anyhow!("push requires an explicit serial port (refusing to overwrite local files)")
     })?;
     let bytes =

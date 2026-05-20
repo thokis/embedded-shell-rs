@@ -20,8 +20,12 @@ struct StatusReport<'a> {
     description: &'a str,
 }
 
-pub async fn run(args: ServiceArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+pub async fn run(
+    args: ServiceArgs,
+    port: Option<&str>,
+    password: Option<&str>,
+) -> Result<ExitCode> {
+    let mut shell = open_linux(port, password).await?;
 
     match args.action {
         ServiceAction::Status => {

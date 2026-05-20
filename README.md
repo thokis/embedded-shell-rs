@@ -43,7 +43,7 @@ cargo install --path crates/embedded-shell-cli
 which eshell && eshell --help
 ```
 
-Once installed, `eshell exec /dev/ttyUSB0 -- uname -a` works from any
+Once installed, `eshell -p /dev/ttyUSB0 exec -- uname -a` works from any
 directory. See
 [`crates/embedded-shell-cli/README.md`](crates/embedded-shell-cli/README.md)
 for the full subcommand reference.

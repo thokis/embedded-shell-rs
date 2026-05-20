@@ -13,43 +13,53 @@ cargo install --path crates/embedded-shell-cli
 
 The crate is `embedded-shell-cli`; the installed binary is `eshell`.
 
+## Picking the target
+
+The target is a **global flag**, not a positional argument:
+
+```sh
+eshell -p /dev/ttyUSB0 <subcommand> [args…]   # serial device
+ESHELL_PORT=/dev/ttyUSB0 eshell <subcommand>  # same thing, via env
+eshell <subcommand> [args…]                   # local host (SubprocessShell)
+```
+
+Omitting `-p`/`--port` (and not setting `ESHELL_PORT`) runs the
+subcommand against the **local host** via `SubprocessShell` — same code
+paths, no serial line involved. Useful for trying the tool out without
+a device attached, and for running the wrapper code against the host's
+own systemd / network stack.
+
+`push`, `pull`, and `reboot` refuse local mode: the blast radius
+against the host's filesystem or boot state is too large for an
+ergonomic shortcut. You'll get a clear error if you try.
+
 ## Subcommands
 
 | Command | What it does |
 |---|---|
-| `eshell exec PORT -- argv…` | Run one command on the device, mirror stdout/stderr/exit code. `--json` for structured output. |
-| `eshell push PORT --src ... --dst ... [--mode 0644] [--via http\|serial]` | Push a local file to the device. Default is HTTP-first with serial fallback. |
-| `eshell pull PORT --src ... --dst ... [--via http\|serial]` | Fetch a remote file. Same fallback policy as `push`. |
-| `eshell info PORT [--json]` | Pretty-prints OS, kernel, uptime, memory, root-fs usage, IPv4. |
-| `eshell ping PORT TARGET [--count N] [--json]` | Ping `TARGET` from the device. Exits 1 on total loss so scripts can branch. |
-| `eshell reboot PORT` | Reboot the device, wait for it to come back. Reports how long that took. |
-| `eshell service PORT UNIT <action>` | Systemd unit control. `<action>` is one of `status` / `start` / `stop` / `restart` / `reload` / `enable` / `disable`. `status` returns structured info (and exits 3 if not active, mirroring `systemctl is-active`); `--json` for the status flavor. |
-| `eshell services PORT [--pattern P] [--failed-only] [--json]` | Tabular listing of systemd units. Default shows every active unit; `--pattern '*.service'` to filter, `--failed-only` to show just the broken ones. |
-| `eshell journal PORT [--unit U] [-n N] [--since EXPR] [--json]` | Tail the systemd journal. Filters compose: `--unit foo --since "1 hour ago"` gives that unit's last hour. Default is the last 50 entries from everything. `--json` emits JSONL. |
-| `eshell modem PORT [-m INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. Without `-m`, the first modem mmcli reports is used; pass `-m 1` (etc.) on multi-modem devices. `--no-sim` skips the SIM lookup. |
-| `eshell network PORT [--json]` | Comprehensive network state: kernel-view (`ip -j` links/addresses/routes) and NM-view (`nmcli` connections) side by side. Gracefully degrades to NM-only on devices whose `ip` lacks JSON support. |
+| `eshell exec -- argv…` | Run one command on the device, mirror stdout/stderr/exit code. `--json` for structured output. |
+| `eshell push --src ... --dst ... [--mode 0644] [--via http\|serial]` | Push a local file to the device. Default is HTTP-first with serial fallback. |
+| `eshell pull --src ... --dst ... [--via http\|serial]` | Fetch a remote file. Same fallback policy as `push`. |
+| `eshell info [--json]` | Pretty-prints OS, kernel, uptime, memory, root-fs usage, IPv4. |
+| `eshell ping TARGET [--count N] [--json]` | Ping `TARGET` from the device. Exits 1 on total loss so scripts can branch. |
+| `eshell reboot` | Reboot the device, wait for it to come back. Reports how long that took. |
+| `eshell service UNIT <action>` | Systemd unit control. `<action>` is one of `status` / `start` / `stop` / `restart` / `reload` / `enable` / `disable`. `status` returns structured info (and exits 3 if not active, mirroring `systemctl is-active`); `--json` for the status flavor. |
+| `eshell services [--pattern P] [--failed-only] [--json]` | Tabular listing of systemd units. Default shows every active unit; `--pattern '*.service'` to filter, `--failed-only` to show just the broken ones. |
+| `eshell journal [--unit U] [-n N] [--since EXPR] [--json]` | Tail the systemd journal. Filters compose: `--unit foo --since "1 hour ago"` gives that unit's last hour. Default is the last 50 entries from everything. `--json` emits JSONL. |
+| `eshell modem [-m INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. Without `-m`, the first modem mmcli reports is used; pass `-m 1` (etc.) on multi-modem devices. `--no-sim` skips the SIM lookup. |
+| `eshell network [--json]` | Comprehensive network state: kernel-view (`ip -j` links/addresses/routes) and NM-view (`nmcli` connections) side by side. Gracefully degrades to NM-only on devices whose `ip` lacks JSON support. |
 
-`PORT` is the device's serial port (e.g. `/dev/ttyUSB0`). See *Local
-mode* below for what omitting it does.
+Prepend `-p PORT` (or set `ESHELL_PORT`) to target a serial device.
 
-## Local mode (no port)
-
-Every subcommand except `push`, `pull`, and `reboot` accepts an absent
-`PORT` and runs against the **local host** via `SubprocessShell` — same
-code paths, no serial line involved. Useful for trying the tool out
-without a device attached, and for running the wrapper code against the
-host's own systemd / network stack:
+## Local-mode examples
 
 ```sh
 eshell info                                  # local host's OS / uptime / IPv4
 eshell services --failed-only                # this laptop's failed units
 eshell journal --unit sshd.service -n 20     # local journal
 eshell ping 8.8.8.8 --count 2                # ping from this host
+eshell exec -- sh -c 'free -h | head -2'     # arbitrary command, local
 ```
-
-`push`, `pull`, and `reboot` deliberately refuse local mode: the blast
-radius against the host's filesystem or boot state is too large for an
-ergonomic shortcut. You'll get a clear error if you try.
 
 ## Transport fallback for push/pull
 
@@ -75,9 +85,9 @@ fail loudly.
 The CLI accepts a login password via:
 
 ```sh
-eshell --password 'secret' info /dev/ttyUSB0
+eshell --password 'secret' -p /dev/ttyUSB0 info
 # or
-ESHELL_PASSWORD=secret eshell info /dev/ttyUSB0
+ESHELL_PASSWORD=secret eshell -p /dev/ttyUSB0 info
 ```
 
 The env-var path is preferred in scripts so the password doesn't end
@@ -90,7 +100,7 @@ subcommand.
 (default `warn`). To see the library's lifecycle events:
 
 ```sh
-RUST_LOG=embedded_shell=info,embedded_shell_transfer=info eshell push /dev/ttyUSB0 \
+RUST_LOG=embedded_shell=info,embedded_shell_transfer=info eshell -p /dev/ttyUSB0 push \
     --src ./config.json --dst /etc/app.cfg --mode 0644
 ```
 
@@ -101,41 +111,41 @@ byte-level RX/TX of the serial line.
 
 ```sh
 # Run something on the device
-eshell exec /dev/ttyUSB0 -- uname -a
-eshell exec /dev/ttyUSB0 -- sh -c 'systemctl is-active sshd'
+eshell -p /dev/ttyUSB0 exec -- uname -a
+eshell -p /dev/ttyUSB0 exec -- sh -c 'systemctl is-active sshd'
 
 # Push a config and chmod it
-eshell push /dev/ttyUSB0 --src ./app.cfg --dst /etc/app.cfg --mode 0644
+eshell -p /dev/ttyUSB0 push --src ./app.cfg --dst /etc/app.cfg --mode 0644
 
 # Pull a log
-eshell pull /dev/ttyUSB0 --src /var/log/messages --dst .
+eshell -p /dev/ttyUSB0 pull --src /var/log/messages --dst .
 
 # Health snapshot, as JSON for piping to jq
-eshell info /dev/ttyUSB0 --json | jq .
+eshell -p /dev/ttyUSB0 info --json | jq .
 
 # Smoke-test connectivity, scripted
-if eshell ping /dev/ttyUSB0 8.8.8.8 --count 2 >/dev/null; then
+if eshell -p /dev/ttyUSB0 ping 8.8.8.8 --count 2 >/dev/null; then
     echo "online"
 fi
 
 # Reboot and verify it comes back
-eshell reboot /dev/ttyUSB0
+eshell -p /dev/ttyUSB0 reboot
 
 # Check a service, then restart it
-eshell service /dev/ttyUSB0 sshd.service status
-eshell service /dev/ttyUSB0 sshd.service restart
+eshell -p /dev/ttyUSB0 service sshd.service status
+eshell -p /dev/ttyUSB0 service sshd.service restart
 
 # Last hour of logs from one unit, JSONL for pipeline use
-eshell journal /dev/ttyUSB0 --unit sshd.service --since "1 hour ago" --json | jq .
+eshell -p /dev/ttyUSB0 journal --unit sshd.service --since "1 hour ago" --json | jq .
 
 # Modem inventory — pipeline-friendly JSON
-eshell modem /dev/ttyUSB0 --json | jq '{model, signal_quality, operator: .operator_name}'
+eshell -p /dev/ttyUSB0 modem --json | jq '{model, signal_quality, operator: .operator_name}'
 
 # Failed services on this device
-eshell services /dev/ttyUSB0 --failed-only
+eshell -p /dev/ttyUSB0 services --failed-only
 
 # Network state in one call
-eshell network /dev/ttyUSB0
+eshell -p /dev/ttyUSB0 network
 ```
 
 ## Exit codes

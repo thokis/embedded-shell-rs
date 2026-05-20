@@ -21,8 +21,12 @@ struct EntryReport<'a> {
     message: &'a str,
 }
 
-pub async fn run(args: JournalArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+pub async fn run(
+    args: JournalArgs,
+    port: Option<&str>,
+    password: Option<&str>,
+) -> Result<ExitCode> {
+    let mut shell = open_linux(port, password).await?;
 
     // Pick the right journalctl function by which filters were given.
     let entries = match (args.unit.as_deref(), args.since.as_deref()) {

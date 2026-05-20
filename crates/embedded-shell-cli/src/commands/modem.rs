@@ -35,8 +35,8 @@ struct SimReport {
     operator_code: Option<String>,
 }
 
-pub async fn run(args: ModemArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+pub async fn run(args: ModemArgs, port: Option<&str>, password: Option<&str>) -> Result<ExitCode> {
+    let mut shell = open_linux(port, password).await?;
 
     // If --modem/-m isn't given, look up modems via mmcli and pick
     // the first one. This is friendly on multi-modem devices (no

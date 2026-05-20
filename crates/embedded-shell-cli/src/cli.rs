@@ -11,6 +11,16 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     about = "Command-line driver for embedded-shell-rs devices over a serial line."
 )]
 pub struct Cli {
+    /// Serial port the device is on (e.g. `/dev/ttyUSB0`). When
+    /// omitted, the subcommand runs against the **local host** via
+    /// `SubprocessShell` — useful for quickly trying the tool out
+    /// without hooking up a device. The `push`, `pull`, and `reboot`
+    /// subcommands refuse this mode because their blast radius
+    /// against the local host would be unsafe. Reads `ESHELL_PORT`
+    /// from the environment when the flag is absent.
+    #[arg(short = 'p', long = "port", env = "ESHELL_PORT", global = true)]
+    pub port: Option<String>,
+
     /// Login password if the device requires one. Reads `ESHELL_PASSWORD`
     /// from the environment when the flag is absent.
     #[arg(long, env = "ESHELL_PASSWORD", global = true, hide_env_values = true)]
@@ -50,22 +60,8 @@ pub enum Command {
     Network(NetworkArgs),
 }
 
-/// Common arguments accepted by every subcommand.
-#[derive(Args, Clone)]
-pub struct Common {
-    /// Serial port the device is on (e.g. `/dev/ttyUSB0`). When
-    /// omitted, the subcommand runs against the **local host** via
-    /// `SubprocessShell` — useful for quickly trying the tool out
-    /// without hooking up a device. The `push`, `pull`, and `reboot`
-    /// subcommands refuse this mode because their blast radius
-    /// against the local host would be unsafe.
-    pub port: Option<String>,
-}
-
 #[derive(Args)]
 pub struct ExecArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Command and arguments to run on the device. Everything after `--`
     /// is forwarded verbatim.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
@@ -78,8 +74,6 @@ pub struct ExecArgs {
 
 #[derive(Args)]
 pub struct PushArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Local source path.
     #[arg(long)]
     pub src: PathBuf,
@@ -98,8 +92,6 @@ pub struct PushArgs {
 
 #[derive(Args)]
 pub struct PullArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Remote source path on the device.
     #[arg(long)]
     pub src: String,
@@ -115,8 +107,6 @@ pub struct PullArgs {
 
 #[derive(Args)]
 pub struct InfoArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Emit the result as JSON on stdout.
     #[arg(long)]
     pub json: bool,
@@ -124,8 +114,6 @@ pub struct InfoArgs {
 
 #[derive(Args)]
 pub struct PingArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Target hostname or IP — passed verbatim to the device's `ping`.
     pub target: String,
     /// Number of ICMP echo requests to send.
@@ -137,15 +125,10 @@ pub struct PingArgs {
 }
 
 #[derive(Args)]
-pub struct RebootArgs {
-    #[command(flatten)]
-    pub common: Common,
-}
+pub struct RebootArgs {}
 
 #[derive(Args)]
 pub struct ServiceArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// systemd unit name, e.g. `sshd.service` (the `.service` suffix
     /// is optional; systemd infers it).
     pub unit: String,
@@ -174,8 +157,6 @@ pub enum ServiceAction {
 
 #[derive(Args)]
 pub struct JournalArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Filter to one systemd unit. Without this, every accessible
     /// source is included.
     #[arg(long)]
@@ -197,8 +178,6 @@ pub struct JournalArgs {
 
 #[derive(Args)]
 pub struct ServicesArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Glob pattern to filter by (e.g. `*.service`, `nginx*`).
     /// Without this, every loaded service-class unit is listed.
     #[arg(long)]
@@ -213,8 +192,6 @@ pub struct ServicesArgs {
 
 #[derive(Args)]
 pub struct NetworkArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Emit the full network state as a single JSON object.
     #[arg(long)]
     pub json: bool,
@@ -222,8 +199,6 @@ pub struct NetworkArgs {
 
 #[derive(Args)]
 pub struct ModemArgs {
-    #[command(flatten)]
-    pub common: Common,
     /// Modem index from `mmcli -L`. Without this flag, the first
     /// modem ModemManager knows about is used (or the command errors
     /// out clearly if there are none).

@@ -19,8 +19,12 @@ struct ServiceReport<'a> {
     description: &'a str,
 }
 
-pub async fn run(args: ServicesArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+pub async fn run(
+    args: ServicesArgs,
+    port: Option<&str>,
+    password: Option<&str>,
+) -> Result<ExitCode> {
+    let mut shell = open_linux(port, password).await?;
 
     let pattern = args.pattern.as_deref();
     let mut units = systemd::list_units(&mut *shell, pattern).await?;

@@ -21,8 +21,8 @@ struct PingReport<'a> {
     rtt_max_ms: Option<f32>,
 }
 
-pub async fn run(args: PingArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+pub async fn run(args: PingArgs, port: Option<&str>, password: Option<&str>) -> Result<ExitCode> {
+    let mut shell = open_linux(port, password).await?;
     let stats = iputils::ping(&mut *shell, &args.target, args.count).await?;
     let _ = shell.deactivate().await;
 

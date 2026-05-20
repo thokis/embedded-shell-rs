@@ -21,13 +21,9 @@ struct DeviceInfo {
     ipv4: String,
 }
 
-pub async fn run(args: InfoArgs, password: Option<&str>) -> Result<ExitCode> {
-    let port = args
-        .common
-        .port
-        .clone()
-        .unwrap_or_else(|| "(local)".to_string());
-    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+pub async fn run(args: InfoArgs, port: Option<&str>, password: Option<&str>) -> Result<ExitCode> {
+    let port_label = port.unwrap_or("(local)").to_string();
+    let mut shell = open_linux(port, password).await?;
 
     let os_release = fs::read_to_string(&mut *shell, "/etc/os-release")
         .await
@@ -61,7 +57,7 @@ pub async fn run(args: InfoArgs, password: Option<&str>) -> Result<ExitCode> {
     );
 
     let info = DeviceInfo {
-        port,
+        port: port_label,
         os: pretty_name(&os_release),
         kernel,
         uptime,
