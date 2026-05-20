@@ -1,5 +1,6 @@
 //! `eshell journal PORT [--unit U] [-n N] [--since EXPR] [--json]`
 
+use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -56,13 +57,19 @@ pub async fn run(
             println!();
         }
     } else {
+        let use_color = std::io::stdout().is_terminal();
         for e in &entries {
+            let priority_letter = e.priority.map(priority_letter).unwrap_or('-');
+            let priority_color = e.priority.map(priority_color).unwrap_or(""); // no color for missing
+            let priority_tag = if use_color && !priority_color.is_empty() {
+                format!("\x1b[{priority_color}m[{priority_letter}]\x1b[0m")
+            } else {
+                format!("[{priority_letter}]")
+            };
             println!(
                 "{} {} {}{}: {}",
                 format_timestamp(e.timestamp),
-                e.priority
-                    .map(|p| format!("[{}]", priority_letter(p)))
-                    .unwrap_or_else(|| "[-]".to_string()),
+                priority_tag,
                 e.identifier.as_deref().unwrap_or("?"),
                 e.pid.map(|p| format!("[{p}]")).unwrap_or_default(),
                 e.message.trim_end(),
@@ -71,6 +78,27 @@ pub async fn run(
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// ANSI SGR code per priority, picked so the visual loudness scales
+/// with severity. Empty string = no color (info / debug stay neutral).
+fn priority_color(p: journalctl::Priority) -> &'static str {
+    match p {
+        // Bold red for emerg/alert/crit — these stop the world.
+        journalctl::Priority::Emergency
+        | journalctl::Priority::Alert
+        | journalctl::Priority::Critical => "1;31",
+        // Plain red for error.
+        journalctl::Priority::Error => "31",
+        // Yellow for warning.
+        journalctl::Priority::Warning => "33",
+        // Bold for notice — slightly louder than info.
+        journalctl::Priority::Notice => "1",
+        // Info: terminal default.
+        journalctl::Priority::Info => "",
+        // Debug: dim.
+        journalctl::Priority::Debug => "90",
+    }
 }
 
 fn format_timestamp(t: SystemTime) -> String {
