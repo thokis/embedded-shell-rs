@@ -8,8 +8,10 @@ reboot.
 ## Install
 
 ```sh
-cargo install --path crates/eshell
+cargo install --path crates/embedded-shell-cli
 ```
+
+The crate is `embedded-shell-cli`; the installed binary is `eshell`.
 
 ## Subcommands
 
@@ -27,7 +29,27 @@ cargo install --path crates/eshell
 | `eshell modem PORT [-m INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. Without `-m`, the first modem mmcli reports is used; pass `-m 1` (etc.) on multi-modem devices. `--no-sim` skips the SIM lookup. |
 | `eshell network PORT [--json]` | Comprehensive network state: kernel-view (`ip -j` links/addresses/routes) and NM-view (`nmcli` connections) side by side. Gracefully degrades to NM-only on devices whose `ip` lacks JSON support. |
 
-`PORT` is always the device's serial port (e.g. `/dev/ttyUSB0`).
+`PORT` is the device's serial port (e.g. `/dev/ttyUSB0`). See *Local
+mode* below for what omitting it does.
+
+## Local mode (no port)
+
+Every subcommand except `push`, `pull`, and `reboot` accepts an absent
+`PORT` and runs against the **local host** via `SubprocessShell` — same
+code paths, no serial line involved. Useful for trying the tool out
+without a device attached, and for running the wrapper code against the
+host's own systemd / network stack:
+
+```sh
+eshell info                                  # local host's OS / uptime / IPv4
+eshell services --failed-only                # this laptop's failed units
+eshell journal --unit sshd.service -n 20     # local journal
+eshell ping 8.8.8.8 --count 2                # ping from this host
+```
+
+`push`, `pull`, and `reboot` deliberately refuse local mode: the blast
+radius against the host's filesystem or boot state is too large for an
+ergonomic shortcut. You'll get a clear error if you try.
 
 ## Transport fallback for push/pull
 
