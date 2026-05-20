@@ -22,8 +22,10 @@ cargo install --path crates/eshell
 | `eshell ping PORT TARGET [--count N] [--json]` | Ping `TARGET` from the device. Exits 1 on total loss so scripts can branch. |
 | `eshell reboot PORT` | Reboot the device, wait for it to come back. Reports how long that took. |
 | `eshell service PORT UNIT <action>` | Systemd unit control. `<action>` is one of `status` / `start` / `stop` / `restart` / `reload` / `enable` / `disable`. `status` returns structured info (and exits 3 if not active, mirroring `systemctl is-active`); `--json` for the status flavor. |
+| `eshell services PORT [--pattern P] [--failed-only] [--json]` | Tabular listing of systemd units. Default shows every active unit; `--pattern '*.service'` to filter, `--failed-only` to show just the broken ones. |
 | `eshell journal PORT [--unit U] [-n N] [--since EXPR] [--json]` | Tail the systemd journal. Filters compose: `--unit foo --since "1 hour ago"` gives that unit's last hour. Default is the last 50 entries from everything. `--json` emits JSONL. |
 | `eshell modem PORT [INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. `INDEX` defaults to `0`. `--no-sim` skips the SIM lookup (faster, doesn't error if no SIM is inserted). |
+| `eshell network PORT [--json]` | Comprehensive network state: kernel-view (`ip -j` links/addresses/routes) and NM-view (`nmcli` connections) side by side. Gracefully degrades to NM-only on devices whose `ip` lacks JSON support. |
 
 `PORT` is always the device's serial port (e.g. `/dev/ttyUSB0`).
 
@@ -106,6 +108,12 @@ eshell journal /dev/ttyUSB0 --unit sshd.service --since "1 hour ago" --json | jq
 
 # Modem inventory — pipeline-friendly JSON
 eshell modem /dev/ttyUSB0 --json | jq '{model, signal_quality, operator: .operator_name}'
+
+# Failed services on this device
+eshell services /dev/ttyUSB0 --failed-only
+
+# Network state in one call
+eshell network /dev/ttyUSB0
 ```
 
 ## Exit codes

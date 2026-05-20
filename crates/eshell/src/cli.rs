@@ -38,10 +38,16 @@ pub enum Command {
     Reboot(RebootArgs),
     /// Inspect or control one systemd unit.
     Service(ServiceArgs),
+    /// List systemd units (active by default; opt in to all/failed
+    /// subsets via flags).
+    Services(ServicesArgs),
     /// Tail the systemd journal.
     Journal(JournalArgs),
     /// Show details of one cellular modem (and its primary SIM).
     Modem(ModemArgs),
+    /// Comprehensive network state — interfaces, addresses, default
+    /// route, NM active connections.
+    Network(NetworkArgs),
 }
 
 /// Common arguments accepted by every subcommand.
@@ -180,6 +186,31 @@ pub struct JournalArgs {
     pub count: u32,
     /// Emit each entry as JSON on its own line (JSONL) instead of
     /// human-readable text.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args)]
+pub struct ServicesArgs {
+    #[command(flatten)]
+    pub common: Common,
+    /// Glob pattern to filter by (e.g. `*.service`, `nginx*`).
+    /// Without this, every loaded service-class unit is listed.
+    #[arg(long)]
+    pub pattern: Option<String>,
+    /// Only show units in the `failed` state.
+    #[arg(long)]
+    pub failed_only: bool,
+    /// Emit `[{unit, load, active, sub, description}, …]` as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args)]
+pub struct NetworkArgs {
+    #[command(flatten)]
+    pub common: Common,
+    /// Emit the full network state as a single JSON object.
     #[arg(long)]
     pub json: bool,
 }

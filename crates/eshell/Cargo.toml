@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 embedded-shell = { path = "../embedded-shell" }
-embedded-shell-linux = { path = "../embedded-shell-linux", features = ["systemd", "modemmanager"] }
+embedded-shell-linux = { path = "../embedded-shell-linux", features = ["systemd", "modemmanager", "iproute2", "networkmanager"] }
 embedded-shell-transfer = { path = "../embedded-shell-transfer", features = ["http", "serial"] }
 
 anyhow.workspace = true
