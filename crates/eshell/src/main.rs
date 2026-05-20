@@ -26,6 +26,9 @@ async fn main() -> ExitCode {
         Command::Info(args) => commands::info::run(args, password).await,
         Command::Ping(args) => commands::ping::run(args, password).await,
         Command::Reboot(args) => commands::reboot::run(args, password).await,
+        Command::Service(args) => commands::service::run(args, password).await,
+        Command::Journal(args) => commands::journal::run(args, password).await,
+        Command::Modem(args) => commands::modem::run(args, password).await,
     };
 
     match result {

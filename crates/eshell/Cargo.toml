@@ -1,7 +1,7 @@
 [package]
 name = "eshell"
 version = "0.1.0"
-description = "Command-line driver for embedded-shell-rs — exec, push, pull, info, ping, reboot over a serial line."
+description = "Command-line driver for embedded-shell-rs — exec, push, pull, info, ping, reboot, service, journal, modem over a serial line."
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 embedded-shell = { path = "../embedded-shell" }
-embedded-shell-linux = { path = "../embedded-shell-linux" }
+embedded-shell-linux = { path = "../embedded-shell-linux", features = ["systemd", "modemmanager"] }
 embedded-shell-transfer = { path = "../embedded-shell-transfer", features = ["http", "serial"] }
 
 anyhow.workspace = true

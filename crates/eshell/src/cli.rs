@@ -36,6 +36,12 @@ pub enum Command {
     Ping(PingArgs),
     /// Reboot the device and wait for it to come back.
     Reboot(RebootArgs),
+    /// Inspect or control one systemd unit.
+    Service(ServiceArgs),
+    /// Tail the systemd journal.
+    Journal(JournalArgs),
+    /// Show details of one cellular modem (and its primary SIM).
+    Modem(ModemArgs),
 }
 
 /// Common arguments accepted by every subcommand.
@@ -123,6 +129,76 @@ pub struct PingArgs {
 pub struct RebootArgs {
     #[command(flatten)]
     pub common: Common,
+}
+
+#[derive(Args)]
+pub struct ServiceArgs {
+    #[command(flatten)]
+    pub common: Common,
+    /// systemd unit name, e.g. `sshd.service` (the `.service` suffix
+    /// is optional; systemd infers it).
+    pub unit: String,
+    /// What to do with the unit. `status` prints the structured
+    /// state; `start`/`stop`/`restart`/`reload` perform that action;
+    /// `enable`/`disable` toggle boot persistence (and never start
+    /// or stop the unit themselves).
+    #[arg(value_enum)]
+    pub action: ServiceAction,
+    /// For `status`: emit the `UnitStatus` as JSON instead of the
+    /// human-readable table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum ServiceAction {
+    Status,
+    Start,
+    Stop,
+    Restart,
+    Reload,
+    Enable,
+    Disable,
+}
+
+#[derive(Args)]
+pub struct JournalArgs {
+    #[command(flatten)]
+    pub common: Common,
+    /// Filter to one systemd unit. Without this, every accessible
+    /// source is included.
+    #[arg(long)]
+    pub unit: Option<String>,
+    /// Time-window filter. Passed verbatim to `journalctl --since`
+    /// — accepts everything it does: `"1 hour ago"`, `"yesterday"`,
+    /// `"2024-01-15"`, …
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Number of recent entries to return (only honored when
+    /// `--since` isn't set).
+    #[arg(short = 'n', long, default_value_t = 50)]
+    pub count: u32,
+    /// Emit each entry as JSON on its own line (JSONL) instead of
+    /// human-readable text.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args)]
+pub struct ModemArgs {
+    #[command(flatten)]
+    pub common: Common,
+    /// Modem index from `mmcli -L`. Default 0 — fine on the typical
+    /// single-modem device.
+    #[arg(default_value_t = 0)]
+    pub index: u32,
+    /// Skip the SIM lookup (faster, and avoids erroring when no
+    /// SIM is inserted).
+    #[arg(long)]
+    pub no_sim: bool,
+    /// Emit the modem (and SIM) details as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
