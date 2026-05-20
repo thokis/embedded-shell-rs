@@ -193,10 +193,13 @@ fn path_segments(path: &str) -> Vec<&str> {
 /// Parsed user input. Either an exit request, an introspection
 /// (`?`), or a path to invoke.
 ///
-/// The shell has two reserved bare words (`quit`, `exit`) and one
-/// reserved operator (`?`); everything else is a path that resolves
-/// against the tree. Paths use `/` purely as a segment separator and
-/// the leading slash is optional — `info` and `/info` are equivalent.
+/// The shell has one reserved bare word (`quit`) and one reserved
+/// operator (`?`); everything else is a path that resolves against
+/// the tree. Paths use `/` purely as a segment separator and the
+/// leading slash is optional — `info` and `/info` are equivalent.
+///
+/// One way to do each thing (cf. `DESIGN.md` D-005): no `exit`
+/// alias for `quit`, no `help` alias for `?`.
 #[derive(Debug)]
 enum ParsedInput<'a> {
     Empty,
@@ -210,7 +213,7 @@ fn parse_input(line: &str) -> ParsedInput<'_> {
     if line.is_empty() {
         return ParsedInput::Empty;
     }
-    if line == "quit" || line == "exit" {
+    if line == "quit" {
         return ParsedInput::Exit;
     }
     if line == "?" {
@@ -529,7 +532,9 @@ mod tests {
         assert!(matches!(parse_input(""), ParsedInput::Empty));
         assert!(matches!(parse_input("  "), ParsedInput::Empty));
         assert!(matches!(parse_input("quit"), ParsedInput::Exit));
-        assert!(matches!(parse_input("exit"), ParsedInput::Exit));
+        // `exit` is not a reserved word — it parses as a node lookup.
+        // (D-005: one path per operation.)
+        assert!(matches!(parse_input("exit"), ParsedInput::Invoke(_)));
         assert!(matches!(parse_input("?"), ParsedInput::Inspect(_)));
         // Leading slash is optional — both equivalent.
         for input in ["info?", "/info?"] {

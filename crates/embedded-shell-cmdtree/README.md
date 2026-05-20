@@ -49,8 +49,10 @@ etree> quit               # or Ctrl-D
 ```
 
 **Convention:** the leading `/` is just a separator — `info` and
-`/info` are equivalent. Two reserved bare words (`quit`, `exit`) and
-one operator (`?`) are the only built-ins. Everything else is a path.
+`/info` are equivalent. One reserved bare word (`quit`) and one
+operator (`?`) are the only built-ins. Everything else is a path.
+One path per operation (cf. `DESIGN.md` D-005): no `exit` alias,
+no `help` alias.
 
 `<TAB>` completes node paths.
 
@@ -101,9 +103,8 @@ Pre-1.0 (0.x). The following are intended to remain stable across
 - `Leaf::new`, `Invocation::path`
 - `Repl::{new, run, with_history}`
 
-A 1.0 release will commit the full public API. The two reserved
-bare-word built-ins (`quit`, `exit`) and the `?` operator are part
-of the public surface. Parameter types, typed value completion, and
+A 1.0 release will commit the full public API. The reserved
+bare-word `quit` and the `?` operator are part of the public surface. Parameter types, typed value completion, and
 per-node sub-state (RouterOS-style "edit one item at a time") are
 explicitly **not** in v1 — they're the obvious next layer once a
 downstream consumer has concrete needs.
