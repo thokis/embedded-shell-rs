@@ -5,9 +5,30 @@ Crates in this workspace:
 | Crate | Kind | Purpose |
 |---|---|---|
 | [`embedded-shell`](crates/embedded-shell) | library | Async driver for Linux and U-Boot devices accessed over a serial line. `Shell` trait + concrete shells with deterministic exec framing. Documented in detail below. |
-| [`embedded-shell-linux`](crates/embedded-shell-linux) | library | Thin async wrappers around common Linux userland CLI tools (`fs`, `iputils`, `systemd`, …), executed over any `LinuxShell`. Feature-gated per system package. |
+| [`embedded-shell-linux`](crates/embedded-shell-linux) | library | Thin async wrappers around common Linux userland CLI tools, executed over any `LinuxShell`. Feature-gated per system package — see [the module list below](#whats-in-embedded-shell-linux). |
 | [`embedded-shell-transfer`](crates/embedded-shell-transfer) | library | File push and fetch between host and device, layered on a `LinuxShell`. Two transports behind Cargo features: `http` (fast, network-required) and `serial` (slow but works without network — the bootstrap path). |
 | [`eshell`](crates/eshell) | binary | Command-line driver built on top of the three libraries. `eshell exec / push / pull / info / ping / reboot`. Useful as a daily-driver tool **and** as a reference application showing how to compose the libraries. |
+
+## What's in `embedded-shell-linux`
+
+| Module | Feature | What it wraps |
+|---|---|---|
+| `fs` | `coreutils` (default-on) | `cat`, `ls`, `chmod`, `mkdir`, `rm`, `cp`, `mv`, `ln -s`, `readlink`, `stat`, `find`, `sha256sum`. Mirrors `std::fs` where there's a direct analogue; adds `write_atomic`, `walk_dir`, `sha256sum`. |
+| `iputils` | `iputils` (default-on) | `ping` → `PingStats`; `arping` → `ArpingStats` with the responder's MAC. |
+| `systemd` | `systemd` (opt-in) | `systemctl is-active/is-enabled/is-failed/start/stop/restart/reload/enable/disable/show` → `UnitStatus`. |
+| `journalctl` | `systemd` (opt-in) | `journalctl -o json` → `Vec<LogEntry>`. `tail(N)` and `tail_unit(unit, N)`. |
+| `iproute2` | `iproute2` (opt-in) | `ip -j` JSON → `Vec<Link>` / `Vec<Address>` / `Vec<Route>`. |
+| `networkmanager` | `networkmanager` (opt-in) | `nmcli -t` → `Vec<Connection>` and `Vec<Device>`. Read-only in v1. |
+| `modemmanager` | `modemmanager` (opt-in) | `mmcli -J` → `Vec<u32>` indices and detailed `Modem` per index (state, IMEI, signal, operator, …). |
+
+All wrappers take a `&mut dyn LinuxShell`, so the type system refuses
+to compile a call against `UBootSerialShell`. State-changing
+operations in `iproute2` / `networkmanager` / `modemmanager` are
+deliberately skipped in v1 — read paths cover the 90% case and
+write paths against a device you're remoted into can be self-defeating
+("disconnect the network you're operating over"). Drop into
+`shell.run(Command::new("ip").args([...]))` directly when you need
+mutation.
 
 ## Building
 
@@ -50,8 +71,11 @@ Per-crate, with finer control:
 # tokio::io::duplex synthetic byte streams (no real serial port needed).
 cargo test -p embedded-shell
 
-# embedded-shell-linux — wrapper modules tested against SubprocessShell
-# (fs against /tmp, iputils against 127.0.0.1).
+# embedded-shell-linux — all seven wrapper modules tested against
+# SubprocessShell (fs against /tmp, iputils against 127.0.0.1,
+# systemd/journalctl against host systemd, iproute2/nm/mm against host
+# tools when available — each module's tests skip gracefully when the
+# device-side tool isn't present).
 cargo test -p embedded-shell-linux --all-features
 
 # embedded-shell-transfer — both transports tested against SubprocessShell
@@ -68,9 +92,9 @@ RUST_LOG=embedded_shell=debug,embedded_shell_transfer=debug \
 
 ### Hardware-in-the-loop tests
 
-Each crate (currently `embedded-shell` and `embedded-shell-transfer`)
-ships `#[ignore]`-flagged tests in its `tests/hardware.rs` that drive a
-real device. They're skipped by `cargo test` and run only when asked:
+All three library crates ship `#[ignore]`-flagged tests in their
+`tests/hardware.rs` that drive a real device. They're skipped by
+`cargo test` and run only when asked:
 
 ```sh
 # Defaults to /dev/ttyUSB0 — override per the env vars below.
@@ -106,13 +130,24 @@ Other crates have a single hardware test binary, since they only drive
 Linux:
 
 ```sh
-# embedded-shell-linux — fs + iputils against the device.
+# embedded-shell-linux — fs + iputils + (where the device has them)
+# systemd + journalctl + iproute2 + networkmanager + modemmanager.
 cargo test -p embedded-shell-linux --test hardware --all-features \
   -- --ignored --nocapture
 
 # embedded-shell-transfer — serial and HTTP push/fetch round-trips.
 cargo test -p embedded-shell-transfer --test hardware \
   --features http,serial -- --ignored --nocapture
+```
+
+Or, with the matching `scripts/ci.sh` flags:
+
+```sh
+scripts/ci.sh --hardware              # everything
+scripts/ci.sh --hardware linux        # embedded-shell hardware_linux
+scripts/ci.sh --hardware uboot        # embedded-shell hardware_uboot
+scripts/ci.sh --hardware linux-crate  # embedded-shell-linux
+scripts/ci.sh --hardware transfer     # embedded-shell-transfer
 ```
 
 All three crates share **one implementation** of the state-aware

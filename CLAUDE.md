@@ -28,10 +28,18 @@ A 1.0 release will commit the full public API.
 ## Build / test / lint
 
 ```sh
-cargo build
-cargo test                                  # 106 tests, all in-process
-cargo clippy --all-targets -- -D warnings   # warnings are errors
-cargo build --examples
+scripts/ci.sh                               # full local CI: fmt + build + test + clippy + doc
+scripts/ci.sh --test                        # just the test step
+scripts/ci.sh --hardware [target]           # opt-in hardware tests (linux | uboot | linux-crate | transfer)
+```
+
+Or the raw commands directly:
+
+```sh
+cargo build --workspace --all-features
+cargo test --workspace --all-features       # 200+ in-process unit tests, no hardware needed
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo doc --workspace --no-deps --all-features
 ```
 
 Run a single test:
@@ -164,11 +172,18 @@ embedded-shell-rs/                    ← workspace root
     │           └── uboot.rs           ← UBootSerialShell + builder
     ├── embedded-shell-linux/          ← thin wrappers around Linux userland CLI tools
     │   ├── Cargo.toml
+    │   ├── tests/
+    │   │   └── hardware.rs            ← #[ignore]d hardware integration tests
     │   └── src/
     │       ├── lib.rs                 ← crate root, feature-gated module exports
     │       ├── error.rs               ← Error + Result
-    │       └── fs.rs                  ← read_to_string, read_dir, chmod, sha256sum, …
-    │                                    (more modules — iputils, systemd, … — to come)
+    │       ├── fs.rs                  ← read/write/copy/rename/symlink/walk_dir/metadata/sha256sum/…
+    │       ├── iputils.rs             ← ping + arping (default-on feature)
+    │       ├── systemd.rs             ← systemctl: is_active/start/stop/restart/enable/… + UnitStatus
+    │       ├── journalctl.rs          ← tail / tail_unit, structured LogEntry
+    │       ├── iproute2.rs            ← links/addresses/routes via `ip -j` JSON
+    │       ├── networkmanager.rs      ← connections + devices via `nmcli -t`
+    │       └── modemmanager.rs        ← list_modems + modem(index) via `mmcli -J`
     ├── embedded-shell-transfer/       ← file push/fetch, multi-transport
     │   ├── Cargo.toml
     │   ├── tests/
@@ -197,15 +212,21 @@ embedded-shell-rs/                    ← workspace root
 
 ## Planned work in this workspace
 
-- **More `embedded-shell-linux` modules.** Today: `fs` (coreutils-gated).
-  Next on the list: `iputils::ping`. Empty stub modules (`systemd`,
-  `networkmanager`, `modemmanager`, `iproute2`) are gated by feature
-  flags and await implementation.
-- **More `fs::` ops** in `embedded-shell-linux`: `cp`, `rename`,
-  `metadata` to round out the `std::fs` analogue.
+- **`eshell repl` subcommand.** Interactive framed REPL — adds
+  `rustyline` for line editing; uses the existing `\x1f`-framed exec
+  protocol to give the user cleanly-segmented stdout/stderr/exit-code
+  per line. The signature demo of what the framing enables.
+- **MicroPython shell backend.** A second concrete `Shell` impl (next
+  to `LinuxSerialShell` / `UBootSerialShell` / `SubprocessShell`),
+  driving MicroPython's raw REPL mode. Strategic milestone proving the
+  trait abstraction works across genuinely different shell families.
 - **`embedded-shell-uboot` crate** (speculative): U-Boot-specific
   wrappers (`printenv`, `setenv`, `tftpboot`, `loady`/`loadb`) behind a
   `UBootShell` marker trait, mirroring the `LinuxShell` pattern.
+- **Polish across existing wrapper modules**: `systemd::list_units`
+  (structured), `journalctl::since` (time-window filter),
+  `networkmanager::wifi_list`, `modemmanager::sim` (SIM details). Each
+  small.
 
 ## What does *not* live in this repo
 
