@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use embedded_shell::shell::Shell;
+
 use embedded_shell_linux::journalctl;
 use serde::Serialize;
 
@@ -22,14 +22,14 @@ struct EntryReport<'a> {
 }
 
 pub async fn run(args: JournalArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
 
     // Pick the right journalctl function by which filters were given.
     let entries = match (args.unit.as_deref(), args.since.as_deref()) {
-        (Some(unit), Some(since)) => journalctl::tail_unit_since(&mut shell, unit, since).await?,
-        (Some(unit), None) => journalctl::tail_unit(&mut shell, unit, args.count).await?,
-        (None, Some(since)) => journalctl::tail_since(&mut shell, since).await?,
-        (None, None) => journalctl::tail(&mut shell, args.count).await?,
+        (Some(unit), Some(since)) => journalctl::tail_unit_since(&mut *shell, unit, since).await?,
+        (Some(unit), None) => journalctl::tail_unit(&mut *shell, unit, args.count).await?,
+        (None, Some(since)) => journalctl::tail_since(&mut *shell, since).await?,
+        (None, None) => journalctl::tail(&mut *shell, args.count).await?,
     };
 
     let _ = shell.deactivate().await;

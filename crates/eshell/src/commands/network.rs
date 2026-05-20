@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use embedded_shell::shell::Shell;
+
 use embedded_shell_linux::{iproute2, networkmanager};
 use serde::Serialize;
 
@@ -52,21 +52,21 @@ struct ConnectionReport {
 }
 
 pub async fn run(args: NetworkArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
 
     // iproute2 requires `ip -j` JSON support on the device; older
     // busybox builds don't have it. Treat any iproute2 failure as
     // "no kernel-view data available" rather than bailing the whole
     // command — the NM view is still useful on its own.
-    let (links, addrs, default) = match iproute2::links(&mut shell).await {
+    let (links, addrs, default) = match iproute2::links(&mut *shell).await {
         Ok(ls) => {
-            let addrs = iproute2::addresses(&mut shell).await.unwrap_or_default();
-            let default = iproute2::default_route(&mut shell).await.unwrap_or(None);
+            let addrs = iproute2::addresses(&mut *shell).await.unwrap_or_default();
+            let default = iproute2::default_route(&mut *shell).await.unwrap_or(None);
             (ls, addrs, default)
         }
         Err(_) => (Vec::new(), Vec::new(), None),
     };
-    let nm_active = networkmanager::active_connections(&mut shell)
+    let nm_active = networkmanager::active_connections(&mut *shell)
         .await
         .unwrap_or_default();
 
@@ -115,7 +115,10 @@ pub async fn run(args: NetworkArgs, password: Option<&str>) -> Result<ExitCode> 
         return Ok(ExitCode::SUCCESS);
     }
 
-    println!("==== Network state ({}) ====\n", args.common.port);
+    println!(
+        "==== Network state ({}) ====\n",
+        args.common.port.as_deref().unwrap_or("local")
+    );
 
     if report.links.is_empty() {
         println!("Kernel view (iproute2): unavailable — device's `ip` lacks JSON support.\n");

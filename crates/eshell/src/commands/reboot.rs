@@ -3,14 +3,17 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use embedded_shell::shell::Shell;
 
 use crate::cli::RebootArgs;
-use crate::shell::open_linux;
+use crate::shell::open_serial;
 
 pub async fn run(args: RebootArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let port = args.common.port.as_deref().ok_or_else(|| {
+        anyhow!("reboot requires an explicit serial port (refusing to reboot the local host)")
+    })?;
+    let mut shell = open_serial(port, password).await?;
 
     let started = Instant::now();
     shell.reboot().await?;
@@ -20,7 +23,7 @@ pub async fn run(args: RebootArgs, password: Option<&str>) -> Result<ExitCode> {
 
     println!(
         "✓ device on {} rebooted; shell re-activated in {:.1}s",
-        args.common.port,
+        port,
         elapsed.as_secs_f64()
     );
     Ok(ExitCode::SUCCESS)

@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use embedded_shell::shell::Shell;
+
 use embedded_shell_linux::modemmanager;
 use serde::Serialize;
 
@@ -36,7 +36,7 @@ struct SimReport {
 }
 
 pub async fn run(args: ModemArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
 
     // If --modem/-m isn't given, look up modems via mmcli and pick
     // the first one. This is friendly on multi-modem devices (no
@@ -45,7 +45,7 @@ pub async fn run(args: ModemArgs, password: Option<&str>) -> Result<ExitCode> {
     let index = match args.index {
         Some(i) => i,
         None => {
-            let indices = modemmanager::list_modems(&mut shell).await?;
+            let indices = modemmanager::list_modems(&mut *shell).await?;
             *indices.first().ok_or_else(|| {
                 anyhow!(
                     "ModemManager reports no modems on this device; \
@@ -55,13 +55,13 @@ pub async fn run(args: ModemArgs, password: Option<&str>) -> Result<ExitCode> {
         }
     };
 
-    let m = modemmanager::modem(&mut shell, index).await?;
+    let m = modemmanager::modem(&mut *shell, index).await?;
     let sim = if args.no_sim {
         None
     } else {
         // SIM lookup may legitimately fail (no SIM inserted, modem
         // disabled). Don't error — just leave it out of the report.
-        modemmanager::sim(&mut shell, index).await.ok()
+        modemmanager::sim(&mut *shell, index).await.ok()
     };
 
     let _ = shell.deactivate().await;

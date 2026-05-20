@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use embedded_shell::shell::Shell;
+
 use embedded_shell_linux::systemd;
 use serde::Serialize;
 
@@ -21,11 +21,11 @@ struct StatusReport<'a> {
 }
 
 pub async fn run(args: ServiceArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
 
     match args.action {
         ServiceAction::Status => {
-            let s = systemd::status(&mut shell, &args.unit).await?;
+            let s = systemd::status(&mut *shell, &args.unit).await?;
             if args.json {
                 let report = StatusReport {
                     unit: &args.unit,
@@ -56,12 +56,12 @@ pub async fn run(args: ServiceArgs, password: Option<&str>) -> Result<ExitCode> 
                 ExitCode::from(3)
             });
         }
-        ServiceAction::Start => systemd::start(&mut shell, &args.unit).await?,
-        ServiceAction::Stop => systemd::stop(&mut shell, &args.unit).await?,
-        ServiceAction::Restart => systemd::restart(&mut shell, &args.unit).await?,
-        ServiceAction::Reload => systemd::reload(&mut shell, &args.unit).await?,
-        ServiceAction::Enable => systemd::enable(&mut shell, &args.unit).await?,
-        ServiceAction::Disable => systemd::disable(&mut shell, &args.unit).await?,
+        ServiceAction::Start => systemd::start(&mut *shell, &args.unit).await?,
+        ServiceAction::Stop => systemd::stop(&mut *shell, &args.unit).await?,
+        ServiceAction::Restart => systemd::restart(&mut *shell, &args.unit).await?,
+        ServiceAction::Reload => systemd::reload(&mut *shell, &args.unit).await?,
+        ServiceAction::Enable => systemd::enable(&mut *shell, &args.unit).await?,
+        ServiceAction::Disable => systemd::disable(&mut *shell, &args.unit).await?,
     }
 
     let _ = shell.deactivate().await;

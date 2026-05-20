@@ -3,30 +3,33 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result, bail};
-use embedded_shell::shell::{LinuxShell, Shell};
+use anyhow::{Context, Result, anyhow, bail};
+use embedded_shell::shell::LinuxShell;
 use embedded_shell_transfer::{TransferError, http, serial};
 
 use crate::cli::{PullArgs, Transport};
 use crate::shell::open_linux;
 
 pub async fn run(args: PullArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let port = args.common.port.as_deref().ok_or_else(|| {
+        anyhow!("pull requires an explicit serial port (refusing to fetch from local host)")
+    })?;
+    let mut shell = open_linux(Some(port), password).await?;
 
     let (bytes, used) = match args.via {
         Some(Transport::Http) => (
-            http::fetch(&mut shell, &args.src)
+            http::fetch(&mut *shell, &args.src)
                 .await
                 .context("http fetch (--via http forced)")?,
             "http",
         ),
         Some(Transport::Serial) => (
-            serial::fetch(&mut shell, &args.src)
+            serial::fetch(&mut *shell, &args.src)
                 .await
                 .context("serial fetch (--via serial forced)")?,
             "serial",
         ),
-        None => fetch_auto(&mut shell, &args.src).await?,
+        None => fetch_auto(&mut *shell, &args.src).await?,
     };
 
     let _ = shell.deactivate().await;

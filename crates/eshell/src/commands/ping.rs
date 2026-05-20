@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use embedded_shell::shell::Shell;
+
 use embedded_shell_linux::iputils;
 use serde::Serialize;
 
@@ -22,8 +22,8 @@ struct PingReport<'a> {
 }
 
 pub async fn run(args: PingArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
-    let stats = iputils::ping(&mut shell, &args.target, args.count).await?;
+    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
+    let stats = iputils::ping(&mut *shell, &args.target, args.count).await?;
     let _ = shell.deactivate().await;
 
     if args.json {

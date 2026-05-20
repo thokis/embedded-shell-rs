@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use embedded_shell::shell::Shell;
+
 use embedded_shell_linux::systemd;
 use serde::Serialize;
 
@@ -20,10 +20,10 @@ struct ServiceReport<'a> {
 }
 
 pub async fn run(args: ServicesArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
 
     let pattern = args.pattern.as_deref();
-    let mut units = systemd::list_units(&mut shell, pattern).await?;
+    let mut units = systemd::list_units(&mut *shell, pattern).await?;
     let _ = shell.deactivate().await;
 
     if args.failed_only {

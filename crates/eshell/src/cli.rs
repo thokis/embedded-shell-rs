@@ -53,8 +53,13 @@ pub enum Command {
 /// Common arguments accepted by every subcommand.
 #[derive(Args, Clone)]
 pub struct Common {
-    /// Serial port the device is on (e.g. `/dev/ttyUSB0`).
-    pub port: String,
+    /// Serial port the device is on (e.g. `/dev/ttyUSB0`). When
+    /// omitted, the subcommand runs against the **local host** via
+    /// `SubprocessShell` — useful for quickly trying the tool out
+    /// without hooking up a device. The `push`, `pull`, and `reboot`
+    /// subcommands refuse this mode because their blast radius
+    /// against the local host would be unsafe.
+    pub port: Option<String>,
 }
 
 #[derive(Args)]

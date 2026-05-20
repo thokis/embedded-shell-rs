@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use embedded_shell::shell::{Command, Shell};
+use embedded_shell::shell::Command;
 use embedded_shell_linux::fs;
 use serde::Serialize;
 
@@ -22,10 +22,14 @@ struct DeviceInfo {
 }
 
 pub async fn run(args: InfoArgs, password: Option<&str>) -> Result<ExitCode> {
-    let port = args.common.port.clone();
-    let mut shell = open_linux(&port, password).await?;
+    let port = args
+        .common
+        .port
+        .clone()
+        .unwrap_or_else(|| "(local)".to_string());
+    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
 
-    let os_release = fs::read_to_string(&mut shell, "/etc/os-release")
+    let os_release = fs::read_to_string(&mut *shell, "/etc/os-release")
         .await
         .unwrap_or_default();
     let kernel = first_line_of(shell.run(&Command::new("uname").arg("-a")).await?.stdout());

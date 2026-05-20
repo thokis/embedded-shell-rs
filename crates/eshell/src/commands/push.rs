@@ -2,33 +2,36 @@
 
 use std::process::ExitCode;
 
-use anyhow::{Context, Result, bail};
-use embedded_shell::shell::{Command, LinuxShell, Shell};
+use anyhow::{Context, Result, anyhow, bail};
+use embedded_shell::shell::{Command, LinuxShell};
 use embedded_shell_transfer::{TransferError, http, serial};
 
 use crate::cli::{PushArgs, Transport};
 use crate::shell::open_linux;
 
 pub async fn run(args: PushArgs, password: Option<&str>) -> Result<ExitCode> {
+    let port = args.common.port.as_deref().ok_or_else(|| {
+        anyhow!("push requires an explicit serial port (refusing to overwrite local files)")
+    })?;
     let bytes =
         std::fs::read(&args.src).with_context(|| format!("reading {}", args.src.display()))?;
 
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let mut shell = open_linux(Some(port), password).await?;
 
     let used = match args.via {
         Some(Transport::Http) => {
-            http::push(&mut shell, &bytes, &args.dst)
+            http::push(&mut *shell, &bytes, &args.dst)
                 .await
                 .context("http push (--via http forced)")?;
             "http"
         }
         Some(Transport::Serial) => {
-            serial::push(&mut shell, &bytes, &args.dst)
+            serial::push(&mut *shell, &bytes, &args.dst)
                 .await
                 .context("serial push (--via serial forced)")?;
             "serial"
         }
-        None => push_auto(&mut shell, &bytes, &args.dst).await?,
+        None => push_auto(&mut *shell, &bytes, &args.dst).await?,
     };
 
     if let Some(mode) = &args.mode {

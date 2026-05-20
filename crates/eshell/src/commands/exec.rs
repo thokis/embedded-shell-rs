@@ -4,7 +4,7 @@ use std::io::Write;
 use std::process::ExitCode;
 
 use anyhow::Result;
-use embedded_shell::shell::{Command, Shell, ShellError};
+use embedded_shell::shell::{Command, ShellError};
 use serde::Serialize;
 
 use crate::cli::ExecArgs;
@@ -20,7 +20,7 @@ struct ExecReport<'a> {
 }
 
 pub async fn run(args: ExecArgs, password: Option<&str>) -> Result<ExitCode> {
-    let mut shell = open_linux(&args.common.port, password).await?;
+    let mut shell = open_linux(args.common.port.as_deref(), password).await?;
 
     let mut iter = args.argv.into_iter();
     let head = iter
