@@ -51,7 +51,11 @@ async fn real_main() -> Result<ExitCode> {
     let shell = open_shell(cli.port.as_deref(), cli.password.as_deref()).await?;
 
     let tree = demo::demo_tree();
-    Repl::new(tree, shell).run().await?;
+    Repl::new(tree, shell)
+        .with_banner("etree — embedded-shell command tree. type `?` to list nodes, `quit` (or Ctrl-D) to exit.")
+        .with_prompt("etree> ")
+        .run()
+        .await?;
     Ok(ExitCode::SUCCESS)
 }
 

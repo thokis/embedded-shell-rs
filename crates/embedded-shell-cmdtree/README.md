@@ -38,15 +38,19 @@ ETREE_PORT=/dev/ttyUSB0 etree
 Inside the REPL:
 
 ```
-etree shell. type `?` to list nodes, `\quit` (or Ctrl-D) to exit.
-/> ?
+etree — embedded-shell command tree. type `?` to list nodes, `quit` (or Ctrl-D) to exit.
+etree> ?
 …
-/> /info
-…
-/> /network?       # introspect without running
-…
-/> \quit
+etree> info               # invoke a leaf
+etree> info?              # introspect a leaf without running it
+etree> services?          # introspect a branch — lists children
+etree> services/print     # invoke a nested leaf
+etree> quit               # or Ctrl-D
 ```
+
+**Convention:** the leading `/` is just a separator — `info` and
+`/info` are equivalent. Two reserved bare words (`quit`, `exit`) and
+one operator (`?`) are the only built-ins. Everything else is a path.
 
 `<TAB>` completes node paths.
 
@@ -76,7 +80,11 @@ impl Handler for MyHandler {
 let mut tree = CommandTree::new();
 tree.add("/something/specific", "what this node does", Leaf::new(MyHandler));
 // open a shell however you like
-Repl::new(tree, my_shell).run().await?;
+Repl::new(tree, my_shell)
+    .with_banner("my-shell. ? to list, quit to exit.")
+    .with_prompt("my-shell> ")
+    .run()
+    .await?;
 ```
 
 `CommandTree::mount(path, subtree)` grafts a pre-built subtree under
@@ -93,10 +101,12 @@ Pre-1.0 (0.x). The following are intended to remain stable across
 - `Leaf::new`, `Invocation::path`
 - `Repl::{new, run, with_history}`
 
-A 1.0 release will commit the full public API. Parameter types, typed
-value completion, and per-node sub-state (RouterOS-style "edit one
-item at a time") are explicitly **not** in v1 — they're the obvious
-next layer once a downstream consumer has concrete needs.
+A 1.0 release will commit the full public API. The two reserved
+bare-word built-ins (`quit`, `exit`) and the `?` operator are part
+of the public surface. Parameter types, typed value completion, and
+per-node sub-state (RouterOS-style "edit one item at a time") are
+explicitly **not** in v1 — they're the obvious next layer once a
+downstream consumer has concrete needs.
 
 ## License
 

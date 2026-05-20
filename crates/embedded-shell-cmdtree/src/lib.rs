@@ -190,12 +190,17 @@ fn path_segments(path: &str) -> Vec<&str> {
 // Parser
 // ---------------------------------------------------------------------
 
-/// Parsed user input. Either an action to invoke, or an introspection
-/// request (`?`), or a built-in (`\quit`).
+/// Parsed user input. Either an exit request, an introspection
+/// (`?`), or a path to invoke.
+///
+/// The shell has two reserved bare words (`quit`, `exit`) and one
+/// reserved operator (`?`); everything else is a path that resolves
+/// against the tree. Paths use `/` purely as a segment separator and
+/// the leading slash is optional — `info` and `/info` are equivalent.
 #[derive(Debug)]
 enum ParsedInput<'a> {
     Empty,
-    Builtin(&'a str),
+    Exit,
     Inspect(Vec<&'a str>),
     Invoke(Vec<&'a str>),
 }
@@ -205,8 +210,8 @@ fn parse_input(line: &str) -> ParsedInput<'_> {
     if line.is_empty() {
         return ParsedInput::Empty;
     }
-    if let Some(rest) = line.strip_prefix('\\') {
-        return ParsedInput::Builtin(rest.trim());
+    if line == "quit" || line == "exit" {
+        return ParsedInput::Exit;
     }
     if line == "?" {
         return ParsedInput::Inspect(Vec::new());
@@ -296,6 +301,12 @@ pub struct Repl {
     tree: CommandTree,
     shell: Box<dyn LinuxShell>,
     history_path: Option<PathBuf>,
+    /// Greeting shown once when the REPL starts. Set via
+    /// [`with_banner`][Self::with_banner].
+    banner: Option<String>,
+    /// Input prompt rendered on every line. Defaults to `"> "`.
+    /// Set via [`with_prompt`][Self::with_prompt].
+    prompt: String,
 }
 
 impl Repl {
@@ -305,6 +316,8 @@ impl Repl {
             tree,
             shell,
             history_path: default_history_path(),
+            banner: None,
+            prompt: "> ".to_string(),
         }
     }
 
@@ -315,7 +328,20 @@ impl Repl {
         self
     }
 
-    /// Drive the REPL until the user exits (Ctrl-D or `\quit`).
+    /// Set the one-shot greeting printed before the first prompt.
+    /// Downstream consumers use this to identify their binary.
+    pub fn with_banner(mut self, banner: impl Into<String>) -> Self {
+        self.banner = Some(banner.into());
+        self
+    }
+
+    /// Set the input prompt. Default is `"> "`.
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = prompt.into();
+        self
+    }
+
+    /// Drive the REPL until the user exits (Ctrl-D, `quit`, or `exit`).
     pub async fn run(mut self) -> Result<()> {
         let helper = TreeHelper::from_tree(&self.tree);
         let mut rl: Editor<TreeHelper, rustyline::history::FileHistory> = Editor::new()?;
@@ -326,15 +352,17 @@ impl Repl {
 
         let use_color = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
 
-        println!("etree shell. type `?` to list nodes, `\\quit` (or Ctrl-D) to exit.");
+        if let Some(b) = &self.banner {
+            println!("{b}");
+        }
 
         loop {
-            let line = match rl.readline("/> ") {
+            let line = match rl.readline(&self.prompt) {
                 Ok(l) => l,
                 Err(ReadlineError::Interrupted) => continue,
                 Err(ReadlineError::Eof) => break,
                 Err(e) => {
-                    eprintln!("etree: readline: {e}");
+                    eprintln!("readline: {e}");
                     break;
                 }
             };
@@ -342,31 +370,27 @@ impl Repl {
 
             match parse_input(&line) {
                 ParsedInput::Empty => continue,
-                ParsedInput::Builtin("q" | "quit" | "exit") => break,
-                ParsedInput::Builtin("help" | "?") => print_root_help(&self.tree, use_color),
-                ParsedInput::Builtin(other) => {
-                    eprintln!("etree: unknown built-in: \\{other}");
-                }
+                ParsedInput::Exit => break,
                 ParsedInput::Inspect(segments) => match self.tree.resolve(&segments) {
                     Some(node) => print_node_help(&segments, node, use_color),
-                    None => eprintln!("etree: no such node: /{}", segments.join("/")),
+                    None => eprintln!("no such node: {}", display_path(&segments)),
                 },
                 ParsedInput::Invoke(segments) => {
-                    let path_display = format!("/{}", segments.join("/"));
+                    let path_display = display_path(&segments);
                     match self.tree.resolve(&segments) {
-                        None => eprintln!("etree: no such node: {path_display}"),
+                        None => eprintln!("no such node: {path_display}"),
                         Some(node) => match &node.leaf {
                             Some(leaf) => {
                                 let inv = Invocation {
                                     path: path_display.clone(),
                                 };
                                 if let Err(e) = leaf.handler.invoke(&inv, &mut *self.shell).await {
-                                    eprintln!("etree: {path_display}: {e:#}");
+                                    eprintln!("{path_display}: {e:#}");
                                 }
                             }
                             None => {
                                 eprintln!(
-                                    "etree: {path_display} is a branch — type `{path_display}?` to list children"
+                                    "{path_display} is a branch — type `{path_display}?` to list children"
                                 );
                             }
                         },
@@ -386,34 +410,47 @@ impl Repl {
     }
 }
 
-fn print_root_help(tree: &CommandTree, use_color: bool) {
-    println!("{}", bold("Nodes", use_color));
-    for (name, child) in &tree.root.children {
-        let kind = if child.leaf.is_some() { " " } else { "/" };
-        println!("  /{name}{kind:1}  {help}", help = child.help);
+/// Render a path for display: `info` for a single segment,
+/// `services/print` for nested. No leading slash — slash is purely
+/// a separator. Empty segment list renders as `(root)`.
+fn display_path(segments: &[&str]) -> String {
+    if segments.is_empty() {
+        "(root)".to_string()
+    } else {
+        segments.join("/")
     }
-    println!();
-    println!("Built-ins:  \\quit, \\help.  `<path>?` introspects a sub-tree.");
 }
 
 fn print_node_help(segments: &[&str], node: &Node, use_color: bool) {
-    let path = if segments.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{}", segments.join("/"))
-    };
+    let path = display_path(segments);
     println!("{}", bold(&path, use_color));
     if !node.help.is_empty() {
         println!("  {}", node.help);
     }
-    if node.children.is_empty() && node.leaf.is_some() {
-        println!("  (leaf — invoke with `{path}`)");
-    } else if !node.children.is_empty() {
+    if !node.children.is_empty() {
         println!();
         println!("{}", bold("Children", use_color));
-        for (name, child) in &node.children {
-            let kind = if child.leaf.is_some() { " " } else { "/" };
-            println!("  {name}{kind:1}  {help}", help = child.help);
+        // Pad child names so help text aligns. Branches get a trailing
+        // `/` to advertise nestedness; leaves are bare.
+        let display_names: Vec<(String, &Node)> = node
+            .children
+            .iter()
+            .map(|(name, child)| {
+                let display = if child.children.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{name}/")
+                };
+                (display, child)
+            })
+            .collect();
+        let name_w = display_names
+            .iter()
+            .map(|(d, _)| d.len())
+            .max()
+            .unwrap_or(0);
+        for (display, child) in &display_names {
+            println!("  {display:<name_w$}  {help}", help = child.help);
         }
     }
 }
@@ -491,19 +528,29 @@ mod tests {
     fn parse_input_distinguishes_kinds() {
         assert!(matches!(parse_input(""), ParsedInput::Empty));
         assert!(matches!(parse_input("  "), ParsedInput::Empty));
-        assert!(matches!(
-            parse_input("\\quit"),
-            ParsedInput::Builtin("quit")
-        ));
+        assert!(matches!(parse_input("quit"), ParsedInput::Exit));
+        assert!(matches!(parse_input("exit"), ParsedInput::Exit));
         assert!(matches!(parse_input("?"), ParsedInput::Inspect(_)));
-        match parse_input("/info?") {
-            ParsedInput::Inspect(s) => assert_eq!(s, vec!["info"]),
-            _ => panic!("expected Inspect"),
+        // Leading slash is optional — both equivalent.
+        for input in ["info?", "/info?"] {
+            match parse_input(input) {
+                ParsedInput::Inspect(s) => assert_eq!(s, vec!["info"]),
+                _ => panic!("expected Inspect for `{input}`"),
+            }
         }
-        match parse_input("/info") {
-            ParsedInput::Invoke(s) => assert_eq!(s, vec!["info"]),
-            _ => panic!("expected Invoke"),
+        for input in ["info", "/info"] {
+            match parse_input(input) {
+                ParsedInput::Invoke(s) => assert_eq!(s, vec!["info"]),
+                _ => panic!("expected Invoke for `{input}`"),
+            }
         }
+    }
+
+    #[test]
+    fn display_path_strips_leading_slash() {
+        assert_eq!(display_path(&["info"]), "info");
+        assert_eq!(display_path(&["services", "print"]), "services/print");
+        assert_eq!(display_path(&[]), "(root)");
     }
 
     #[test]
