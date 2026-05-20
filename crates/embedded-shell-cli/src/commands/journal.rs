@@ -72,12 +72,58 @@ pub async fn run(
                 priority_tag,
                 e.identifier.as_deref().unwrap_or("?"),
                 e.pid.map(|p| format!("[{p}]")).unwrap_or_default(),
-                e.message.trim_end(),
+                sanitize_message(&e.message),
             );
         }
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// Collapse a journal `MESSAGE` field into a single terminal line.
+///
+/// systemd preserves whatever the producer wrote into MESSAGE — which
+/// for things like the `apt` output captured via `update-notifier`
+/// includes embedded `\r\n` sequences and other control characters.
+/// Printing those verbatim breaks the one-entry-per-line layout (the
+/// carriage returns make subsequent text overwrite the same terminal
+/// row). This replaces line breaks with a visible `⏎` glyph, squeezes
+/// whitespace, and drops other control chars. Use `--json` if you
+/// need the message byte-for-byte.
+fn sanitize_message(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' => {
+                // Eat a trailing `\n` so `\r\n` becomes a single marker.
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push_str(" ⏎ ");
+            }
+            '\n' => out.push_str(" ⏎ "),
+            '\t' => out.push(' '),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    // Squeeze adjacent spaces introduced by the substitutions, then
+    // trim outer whitespace.
+    let mut squeezed = String::with_capacity(out.len());
+    let mut prev_space = false;
+    for c in out.chars() {
+        if c == ' ' {
+            if !prev_space {
+                squeezed.push(' ');
+            }
+            prev_space = true;
+        } else {
+            squeezed.push(c);
+            prev_space = false;
+        }
+    }
+    squeezed.trim().to_string()
 }
 
 /// ANSI SGR code per priority, picked so the visual loudness scales
@@ -121,5 +167,42 @@ fn priority_letter(p: journalctl::Priority) -> char {
         journalctl::Priority::Notice => 'N',
         journalctl::Priority::Info => 'I',
         journalctl::Priority::Debug => 'D',
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_passes_clean_message_through() {
+        assert_eq!(sanitize_message("hello world"), "hello world");
+    }
+
+    #[test]
+    fn sanitize_collapses_crlf_to_single_marker() {
+        assert_eq!(
+            sanitize_message("line one\r\nline two\r\nline three"),
+            "line one ⏎ line two ⏎ line three"
+        );
+    }
+
+    #[test]
+    fn sanitize_handles_lone_cr_and_lone_lf() {
+        assert_eq!(sanitize_message("a\rb\nc"), "a ⏎ b ⏎ c");
+    }
+
+    #[test]
+    fn sanitize_drops_other_control_chars() {
+        // Bell, ESC, NUL — should be removed entirely.
+        assert_eq!(sanitize_message("a\x07b\x1bc\x00d"), "abcd");
+    }
+
+    #[test]
+    fn sanitize_squeezes_whitespace() {
+        assert_eq!(
+            sanitize_message("  multiple   spaces\tand\ttabs  "),
+            "multiple spaces and tabs"
+        );
     }
 }
