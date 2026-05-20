@@ -35,7 +35,12 @@ struct InfoHandler;
 
 #[async_trait]
 impl Handler for InfoHandler {
-    async fn invoke(&self, _: &Invocation, shell: &mut dyn LinuxShell) -> Result<()> {
+    async fn invoke(
+        &self,
+        _: &Invocation,
+        shell: &mut dyn LinuxShell,
+        out: &mut (dyn std::io::Write + Send),
+    ) -> Result<()> {
         let os_release = fs::read_to_string(shell, "/etc/os-release")
             .await
             .unwrap_or_default();
@@ -58,13 +63,13 @@ impl Handler for InfoHandler {
                 .unwrap_or(""),
         );
 
-        println!();
-        println!("\x1b[1m{hostname}\x1b[0m");
-        println!();
-        println!("  OS         {}", pretty_name(&os_release));
-        println!("  Kernel     {kernel} ({arch})");
-        println!("  Uptime     {}", uptime.trim());
-        println!();
+        writeln!(out)?;
+        writeln!(out, "\x1b[1m{hostname}\x1b[0m")?;
+        writeln!(out)?;
+        writeln!(out, "  OS         {}", pretty_name(&os_release))?;
+        writeln!(out, "  Kernel     {kernel} ({arch})")?;
+        writeln!(out, "  Uptime     {}", uptime.trim())?;
+        writeln!(out)?;
         Ok(())
     }
 }
@@ -90,7 +95,12 @@ struct NetworkHandler;
 
 #[async_trait]
 impl Handler for NetworkHandler {
-    async fn invoke(&self, _: &Invocation, shell: &mut dyn LinuxShell) -> Result<()> {
+    async fn invoke(
+        &self,
+        _: &Invocation,
+        shell: &mut dyn LinuxShell,
+        out: &mut (dyn std::io::Write + Send),
+    ) -> Result<()> {
         let links = iproute2::links(shell).await.unwrap_or_default();
         let addrs = iproute2::addresses(shell).await.unwrap_or_default();
         let default = iproute2::default_route(shell).await.unwrap_or(None);
@@ -98,10 +108,13 @@ impl Handler for NetworkHandler {
             .await
             .unwrap_or_default();
 
-        println!();
-        println!("\x1b[1mLinks\x1b[0m");
+        writeln!(out)?;
+        writeln!(out, "\x1b[1mLinks\x1b[0m")?;
         if links.is_empty() {
-            println!("  (no kernel-view data — device's `ip` may lack JSON support)");
+            writeln!(
+                out,
+                "  (no kernel-view data — device's `ip` may lack JSON support)"
+            )?;
         } else {
             let name_w = links.iter().map(|l| l.name.len()).max().unwrap_or(0);
             let state_w = links.iter().map(|l| l.operstate.len()).max().unwrap_or(0);
@@ -112,12 +125,13 @@ impl Handler for NetworkHandler {
                     "UNKNOWN" => "33",
                     _ => "0",
                 };
-                println!(
+                writeln!(
+                    out,
                     "  {name:<name_w$}  \x1b[{state_color}m{state:<state_w$}\x1b[0m  {mac}",
                     name = l.name,
                     state = l.operstate,
                     mac = l.mac.as_deref().unwrap_or("-"),
-                );
+                )?;
             }
         }
 
@@ -126,45 +140,48 @@ impl Handler for NetworkHandler {
             .filter(|a| a.scope == "global" || a.scope == "host")
             .collect();
         if !visible.is_empty() {
-            println!();
-            println!("\x1b[1mAddresses\x1b[0m");
+            writeln!(out)?;
+            writeln!(out, "\x1b[1mAddresses\x1b[0m")?;
             let iface_w = visible.iter().map(|a| a.interface.len()).max().unwrap_or(0);
             for a in &visible {
-                println!(
+                writeln!(
+                    out,
                     "  {iface:<iface_w$}   {addr}/{prefix}",
                     iface = a.interface,
                     addr = a.address,
                     prefix = a.prefix_len,
-                );
+                )?;
             }
         }
 
-        println!();
-        println!("\x1b[1mDefault route\x1b[0m");
+        writeln!(out)?;
+        writeln!(out, "\x1b[1mDefault route\x1b[0m")?;
         match default {
-            Some(r) => println!(
+            Some(r) => writeln!(
+                out,
                 "  via {}   dev {}",
                 r.gateway.as_deref().unwrap_or("(none)"),
                 r.interface
-            ),
-            None => println!("  (none configured)"),
+            )?,
+            None => writeln!(out, "  (none configured)")?,
         }
 
         if !nm.is_empty() {
-            println!();
-            println!("\x1b[1mConnections\x1b[0m");
+            writeln!(out)?;
+            writeln!(out, "\x1b[1mConnections\x1b[0m")?;
             let name_w = nm.iter().map(|c| c.name.len()).max().unwrap_or(0);
             let kind_w = nm.iter().map(|c| c.kind.len()).max().unwrap_or(0);
             for c in &nm {
-                println!(
+                writeln!(
+                    out,
                     "  {name:<name_w$}   {kind:<kind_w$}   {dev}",
                     name = c.name,
                     kind = c.kind,
                     dev = c.device.as_deref().unwrap_or("-"),
-                );
+                )?;
             }
         }
-        println!();
+        writeln!(out)?;
         Ok(())
     }
 }

@@ -44,12 +44,26 @@ pub mod demo;
 /// Implementors are typically zero-sized structs (`InfoHandler`,
 /// `NetworkHandler`, …) but can carry state if a node needs it. The
 /// invocation gets a `&mut dyn LinuxShell` so it can run commands /
-/// read files / etc. through the shared transport.
+/// read files / etc. through the shared transport, plus a writer to
+/// emit human-readable output (the REPL prints it to stdout; an
+/// HTTP server captures it for the response body; a runbook engine
+/// could capture it for a report).
+///
+/// The writer is `Send` so handlers stay compatible with
+/// multi-threaded async runtimes (e.g. axum). For per-command
+/// buffering — call site allocates a `Vec<u8>`, hands it in, then
+/// dumps the result wherever it's going.
 #[async_trait]
 pub trait Handler: Send + Sync {
-    /// Run the leaf. Errors bubble up to the REPL, which renders them
-    /// on stderr and continues to the next prompt.
-    async fn invoke(&self, inv: &Invocation, shell: &mut dyn LinuxShell) -> Result<()>;
+    /// Run the leaf. Errors bubble up to the caller, which decides
+    /// how to surface them (the REPL renders on stderr and continues
+    /// to the next prompt).
+    async fn invoke(
+        &self,
+        inv: &Invocation,
+        shell: &mut dyn LinuxShell,
+        out: &mut (dyn std::io::Write + Send),
+    ) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------
@@ -107,6 +121,43 @@ impl Node {
             help: String::new(),
             children: BTreeMap::new(),
             leaf: None,
+        }
+    }
+
+    /// Human-readable help text for this node (empty for pure branches
+    /// that nobody bothered to document).
+    pub fn help(&self) -> &str {
+        &self.help
+    }
+
+    /// Iterate `(name, child)` pairs in lexicographic order. Used by
+    /// non-REPL frontends (web UI, runbook engine) that need to render
+    /// children without poking at private fields.
+    pub fn children(&self) -> impl Iterator<Item = (&str, &Node)> {
+        self.children.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// `true` if this node has a runnable [`Leaf`]. Branches return
+    /// `false`; dual-mode nodes (leaf + children) return `true`.
+    pub fn is_leaf(&self) -> bool {
+        self.leaf.is_some()
+    }
+
+    /// Run the node's handler, if any. Returns `Ok(false)` for a pure
+    /// branch (nothing to run); `Ok(true)` after a successful invoke;
+    /// `Err` if the handler itself errored.
+    pub async fn invoke(
+        &self,
+        inv: &Invocation,
+        shell: &mut dyn LinuxShell,
+        out: &mut (dyn std::io::Write + Send),
+    ) -> Result<bool> {
+        match &self.leaf {
+            Some(leaf) => {
+                leaf.handler.invoke(inv, shell, out).await?;
+                Ok(true)
+            }
+            None => Ok(false),
         }
     }
 }
@@ -171,13 +222,22 @@ impl CommandTree {
     }
 
     /// Walk the tree along `path` and return the node, or `None` if
-    /// no such path exists.
-    fn resolve<'a>(&'a self, path: &[&str]) -> Option<&'a Node> {
+    /// no such path exists. Public so non-REPL frontends (web UI,
+    /// runbook engine) can navigate the tree without rebuilding their
+    /// own resolver.
+    pub fn resolve<'a>(&'a self, path: &[&str]) -> Option<&'a Node> {
         let mut cursor = &self.root;
         for seg in path {
             cursor = cursor.children.get(*seg)?;
         }
         Some(cursor)
+    }
+
+    /// Borrow the root [`Node`]. Useful for frontends that want to
+    /// render the top of the tree (`GET /` in the web UI, `?` at the
+    /// REPL prompt).
+    pub fn root(&self) -> &Node {
+        &self.root
     }
 }
 
@@ -410,7 +470,18 @@ impl Repl {
                                     path: path_display.clone(),
                                     args: args.iter().map(|s| s.to_string()).collect(),
                                 };
-                                if let Err(e) = leaf.handler.invoke(&inv, &mut *self.shell).await {
+                                // Buffer the handler's output, then
+                                // flush to stdout in one shot. Keeps
+                                // the Handler future `Send` (StdoutLock
+                                // is not Send) and matches what an
+                                // HTTP server would do.
+                                let mut buf: Vec<u8> = Vec::new();
+                                let result =
+                                    leaf.handler.invoke(&inv, &mut *self.shell, &mut buf).await;
+                                if !buf.is_empty() {
+                                    let _ = std::io::Write::write_all(&mut std::io::stdout(), &buf);
+                                }
+                                if let Err(e) = result {
                                     eprintln!("{path_display}: {e:#}");
                                 }
                             }
@@ -510,7 +581,12 @@ mod tests {
 
     #[async_trait]
     impl Handler for DummyHandler {
-        async fn invoke(&self, _: &Invocation, _: &mut dyn LinuxShell) -> Result<()> {
+        async fn invoke(
+            &self,
+            _: &Invocation,
+            _: &mut dyn LinuxShell,
+            _: &mut (dyn std::io::Write + Send),
+        ) -> Result<()> {
             Ok(())
         }
     }
