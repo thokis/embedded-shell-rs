@@ -32,6 +32,7 @@ async fn main() -> ExitCode {
         Command::Journal(args) => commands::journal::run(args, port, password).await,
         Command::Modem(args) => commands::modem::run(args, port, password).await,
         Command::Network(args) => commands::network::run(args, port, password).await,
+        Command::Repl(args) => commands::repl::run(args, port, password).await,
     };
 
     match result {

@@ -207,15 +207,17 @@ embedded-shell-rs/                    ← workspace root
                 ├── pull.rs            ← HTTP-first with serial fallback
                 ├── info.rs
                 ├── ping.rs
-                └── reboot.rs
+                ├── reboot.rs
+                ├── service.rs         ← single systemd unit (status / start / …)
+                ├── services.rs        ← tabular `systemctl list-units`
+                ├── journal.rs         ← `journalctl` tail / since / unit
+                ├── modem.rs           ← `mmcli` modem + SIM details
+                ├── network.rs         ← combined iproute2 + NetworkManager view
+                └── repl.rs            ← rustyline-backed interactive REPL
 ```
 
 ## Planned work in this workspace
 
-- **`eshell repl` subcommand.** Interactive framed REPL — adds
-  `rustyline` for line editing; uses the existing `\x1f`-framed exec
-  protocol to give the user cleanly-segmented stdout/stderr/exit-code
-  per line. The signature demo of what the framing enables.
 - **MicroPython shell backend.** A second concrete `Shell` impl (next
   to `LinuxSerialShell` / `UBootSerialShell` / `SubprocessShell`),
   driving MicroPython's raw REPL mode. Strategic milestone proving the

@@ -7,5 +7,6 @@ pub mod ping;
 pub mod pull;
 pub mod push;
 pub mod reboot;
+pub mod repl;
 pub mod service;
 pub mod services;

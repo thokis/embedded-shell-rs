@@ -58,6 +58,11 @@ pub enum Command {
     /// Comprehensive network state — interfaces, addresses, default
     /// route, NM active connections.
     Network(NetworkArgs),
+    /// Interactive line-by-line REPL on the target shell. Each line
+    /// runs via the same framed exec protocol the rest of the CLI
+    /// uses, so stdout, stderr, and the exit code stay cleanly
+    /// separated per command.
+    Repl(ReplArgs),
 }
 
 #[derive(Args)]
@@ -211,6 +216,13 @@ pub struct ModemArgs {
     /// Emit the modem (and SIM) details as JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args)]
+pub struct ReplArgs {
+    /// Don't load or save persistent line history. Per-session only.
+    #[arg(long)]
+    pub no_history: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
