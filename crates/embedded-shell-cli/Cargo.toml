@@ -1,11 +1,14 @@
 [package]
-name = "eshell"
+name = "embedded-shell-cli"
 version = "0.1.0"
-description = "Command-line driver for embedded-shell-rs — exec, push, pull, info, ping, reboot, service, journal, modem over a serial line."
+description = "Command-line driver for embedded-shell-rs — exec, push, pull, info, ping, reboot, service, journal, modem, network, services over a serial line. Ships the `eshell` binary."
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+# Crate name is `embedded-shell-cli` (consistent with the rest of the
+# workspace), but the produced binary is `eshell` — short and easy to
+# type for daily use.
 [[bin]]
 name = "eshell"
 path = "src/main.rs"

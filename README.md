@@ -7,7 +7,7 @@ Crates in this workspace:
 | [`embedded-shell`](crates/embedded-shell) | library | Async driver for Linux and U-Boot devices accessed over a serial line. `Shell` trait + concrete shells with deterministic exec framing. Documented in detail below. |
 | [`embedded-shell-linux`](crates/embedded-shell-linux) | library | Thin async wrappers around common Linux userland CLI tools, executed over any `LinuxShell`. Feature-gated per system package — see [the module list below](#whats-in-embedded-shell-linux). |
 | [`embedded-shell-transfer`](crates/embedded-shell-transfer) | library | File push and fetch between host and device, layered on a `LinuxShell`. Two transports behind Cargo features: `http` (fast, network-required) and `serial` (slow but works without network — the bootstrap path). |
-| [`eshell`](crates/eshell) | binary | Command-line driver built on top of the three libraries. `eshell exec / push / pull / info / ping / reboot`. Useful as a daily-driver tool **and** as a reference application showing how to compose the libraries. |
+| [`embedded-shell-cli`](crates/embedded-shell-cli) | binary (`eshell`) | Command-line driver built on top of the three libraries. `eshell exec / push / pull / info / ping / reboot / service / journal / modem / network / services`. Useful as a daily-driver tool **and** as a reference application showing how to compose the libraries. |
 
 ## What's in `embedded-shell-linux`
 
@@ -49,13 +49,14 @@ cargo build -p eshell                 # → target/debug/eshell
 cargo build -p eshell --release       # → target/release/eshell
 
 # Or install it to ~/.cargo/bin so it's on PATH everywhere:
-cargo install --path crates/eshell
+cargo install --path crates/embedded-shell-cli
 which eshell && eshell --help
 ```
 
 Once installed, `eshell exec /dev/ttyUSB0 -- uname -a` works from any
-directory. See [`crates/eshell/README.md`](crates/eshell/README.md) for
-the full subcommand reference.
+directory. See
+[`crates/embedded-shell-cli/README.md`](crates/embedded-shell-cli/README.md)
+for the full subcommand reference.
 
 ## Running tests
 
@@ -256,7 +257,7 @@ Output lands in `target/doc/`. The entry pages worth bookmarking:
 - `target/doc/embedded_shell/index.html`
 - `target/doc/embedded_shell_linux/index.html`
 - `target/doc/embedded_shell_transfer/index.html`
-- `target/doc/eshell/index.html`
+- `target/doc/embedded_shell_cli/index.html`
 
 ### Open them locally
 

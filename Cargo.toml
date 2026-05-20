@@ -4,7 +4,7 @@ members = [
     "crates/embedded-shell",
     "crates/embedded-shell-linux",
     "crates/embedded-shell-transfer",
-    "crates/eshell",
+    "crates/embedded-shell-cli",
 ]
 
 [workspace.package]

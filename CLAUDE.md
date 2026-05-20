@@ -193,7 +193,7 @@ embedded-shell-rs/                    ← workspace root
     │       ├── error.rs               ← TransferError + Result
     │       ├── http.rs                ← hyper server on host + wget/curl on device
     │       └── serial.rs              ← base64 over the shell line
-    └── eshell/                        ← CLI built on top of the three libraries
+    └── embedded-shell-cli/            ← CLI built on top of the three libraries (binary: `eshell`)
         ├── Cargo.toml
         ├── README.md
         └── src/
