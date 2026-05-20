@@ -58,13 +58,18 @@ pub trait Handler: Send + Sync {
 
 /// Parsed user input ready to dispatch.
 ///
-/// The full normalized path the user invoked (e.g. `/info`,
-/// `/network`) — handlers can branch on this if they're reused across
-/// nodes, though most just ignore it.
+/// Carries the path the user invoked (e.g. `info`, `services/print`)
+/// and any trailing whitespace-separated tokens after the path
+/// (`set LogLevel=Debug` → path `set`, args `["LogLevel=Debug"]`).
+/// Handlers that take parameters parse `args` themselves — the engine
+/// stays parameter-shape-agnostic in v1.
 #[derive(Debug, Clone)]
 pub struct Invocation {
-    /// The full normalized path (e.g. `/info`, `/network`).
+    /// The full normalized path (e.g. `info`, `services/print`).
     pub path: String,
+    /// Whitespace-separated tokens after the path. Empty when the
+    /// invocation has no trailing args.
+    pub args: Vec<String>,
 }
 
 // ---------------------------------------------------------------------
@@ -191,12 +196,13 @@ fn path_segments(path: &str) -> Vec<&str> {
 // ---------------------------------------------------------------------
 
 /// Parsed user input. Either an exit request, an introspection
-/// (`?`), or a path to invoke.
+/// (`?`), or a path to invoke (with optional trailing args).
 ///
 /// The shell has one reserved bare word (`quit`) and one reserved
-/// operator (`?`); everything else is a path that resolves against
-/// the tree. Paths use `/` purely as a segment separator and the
-/// leading slash is optional — `info` and `/info` are equivalent.
+/// operator (`?`); everything else is a path. The path is the input
+/// up to the first whitespace; anything after that is split on
+/// whitespace into invocation args. Paths use `/` as a separator
+/// (leading slash optional — `info` and `/info` are equivalent).
 ///
 /// One way to do each thing (cf. `DESIGN.md` D-005): no `exit`
 /// alias for `quit`, no `help` alias for `?`.
@@ -205,7 +211,10 @@ enum ParsedInput<'a> {
     Empty,
     Exit,
     Inspect(Vec<&'a str>),
-    Invoke(Vec<&'a str>),
+    Invoke {
+        segments: Vec<&'a str>,
+        args: Vec<&'a str>,
+    },
 }
 
 fn parse_input(line: &str) -> ParsedInput<'_> {
@@ -223,7 +232,20 @@ fn parse_input(line: &str) -> ParsedInput<'_> {
         let prefix = prefix.trim();
         return ParsedInput::Inspect(path_segments(prefix));
     }
-    ParsedInput::Invoke(path_segments(line))
+    // Invocation: split on first whitespace into path + trailing args.
+    let (path_part, args_part) = match line.find(char::is_whitespace) {
+        Some(idx) => (&line[..idx], line[idx..].trim()),
+        None => (line, ""),
+    };
+    let args = if args_part.is_empty() {
+        Vec::new()
+    } else {
+        args_part.split_whitespace().collect()
+    };
+    ParsedInput::Invoke {
+        segments: path_segments(path_part),
+        args,
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -378,7 +400,7 @@ impl Repl {
                     Some(node) => print_node_help(&segments, node, use_color),
                     None => eprintln!("no such node: {}", display_path(&segments)),
                 },
-                ParsedInput::Invoke(segments) => {
+                ParsedInput::Invoke { segments, args } => {
                     let path_display = display_path(&segments);
                     match self.tree.resolve(&segments) {
                         None => eprintln!("no such node: {path_display}"),
@@ -386,6 +408,7 @@ impl Repl {
                             Some(leaf) => {
                                 let inv = Invocation {
                                     path: path_display.clone(),
+                                    args: args.iter().map(|s| s.to_string()).collect(),
                                 };
                                 if let Err(e) = leaf.handler.invoke(&inv, &mut *self.shell).await {
                                     eprintln!("{path_display}: {e:#}");
@@ -534,7 +557,7 @@ mod tests {
         assert!(matches!(parse_input("quit"), ParsedInput::Exit));
         // `exit` is not a reserved word — it parses as a node lookup.
         // (D-005: one path per operation.)
-        assert!(matches!(parse_input("exit"), ParsedInput::Invoke(_)));
+        assert!(matches!(parse_input("exit"), ParsedInput::Invoke { .. }));
         assert!(matches!(parse_input("?"), ParsedInput::Inspect(_)));
         // Leading slash is optional — both equivalent.
         for input in ["info?", "/info?"] {
@@ -545,9 +568,31 @@ mod tests {
         }
         for input in ["info", "/info"] {
             match parse_input(input) {
-                ParsedInput::Invoke(s) => assert_eq!(s, vec!["info"]),
+                ParsedInput::Invoke { segments, args } => {
+                    assert_eq!(segments, vec!["info"]);
+                    assert!(args.is_empty());
+                }
                 _ => panic!("expected Invoke for `{input}`"),
             }
+        }
+    }
+
+    #[test]
+    fn parse_input_carries_trailing_args() {
+        match parse_input("set LogLevel=Debug") {
+            ParsedInput::Invoke { segments, args } => {
+                assert_eq!(segments, vec!["set"]);
+                assert_eq!(args, vec!["LogLevel=Debug"]);
+            }
+            other => panic!("expected Invoke with args, got {other:?}"),
+        }
+        // Multi-token args + a nested path.
+        match parse_input("config/set foo=1 bar=2") {
+            ParsedInput::Invoke { segments, args } => {
+                assert_eq!(segments, vec!["config", "set"]);
+                assert_eq!(args, vec!["foo=1", "bar=2"]);
+            }
+            other => panic!("expected Invoke with multi-args, got {other:?}"),
         }
     }
 
