@@ -28,3 +28,30 @@ tracing = "0.1"
 # Dev-only / test-only
 serial_test = "3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Release-build settings for the eshell binary (and any example binaries
+# built in release mode). Compile cost goes up; runtime perf, binary
+# size, and startup latency improve.
+[profile.release]
+# `lto = "thin"` is a strong sweet spot: cross-crate inlining without
+# the multi-minute link times of `lto = "fat"`. ~5–15% runtime win
+# typical, ~10–20% slower link.
+lto = "thin"
+# Default is 16 — splitting codegen into one unit per crate lets the
+# optimizer see everything within a crate at once. Slower compile,
+# smaller and faster output.
+codegen-units = 1
+# Strip debug symbols only. (`strip = true` strips everything; we
+# leave Rust-level type info in so a release-built binary still
+# panics with useful backtraces.)
+strip = "symbols"
+# No unwinding — smaller binary, faster panic path. eshell + the
+# example binaries don't catch panics, so unwinding is dead weight.
+panic = "abort"
+
+# Release-with-debuginfo: a "production-shaped" build that still
+# debugs cleanly. Use with `cargo build --profile=release-debug`.
+[profile.release-debug]
+inherits = "release"
+debug = true
+strip = "none"
