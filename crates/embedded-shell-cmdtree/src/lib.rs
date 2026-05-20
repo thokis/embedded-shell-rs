@@ -456,16 +456,20 @@ fn print_node_help(segments: &[&str], node: &Node, use_color: bool) {
     if !node.children.is_empty() {
         println!();
         println!("{}", bold("Children", use_color));
-        // Pad child names so help text aligns. Branches get a trailing
-        // `/` to advertise nestedness; leaves are bare.
+        // Pad child names so help text aligns. The `/` suffix means
+        // **pure branch** (no leaf — must be navigated into). Dual-mode
+        // nodes (leaf + children) render bare so the help text, which
+        // documents the leaf's usage, doesn't conflict with the `/`
+        // signal. Users discover sub-paths via `name?`.
         let display_names: Vec<(String, &Node)> = node
             .children
             .iter()
             .map(|(name, child)| {
-                let display = if child.children.is_empty() {
-                    name.clone()
-                } else {
+                let pure_branch = child.leaf.is_none() && !child.children.is_empty();
+                let display = if pure_branch {
                     format!("{name}/")
+                } else {
+                    name.clone()
                 };
                 (display, child)
             })
