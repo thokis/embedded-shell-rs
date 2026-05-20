@@ -215,7 +215,8 @@ embedded-shell-rs/                    ← workspace root
                 ├── network.rs         ← combined iproute2 + NetworkManager view
                 ├── repl.rs            ← rustyline-backed interactive REPL
                 ├── completions.rs    ← shell-completion script generation
-                └── devices.rs        ← list /dev/ttyUSB*+ACM* with USB descriptors
+                ├── devices.rs        ← list /dev/ttyUSB*+ACM* with USB descriptors
+                └── cat.rs            ← read files (text + binary base64) from the device
 ```
 
 ## Planned work in this workspace
@@ -230,6 +231,13 @@ embedded-shell-rs/                    ← workspace root
 - **CLI output polish across remaining commands.** Done for `info`,
   `services`, `journal`, `network`, and `modem`. Future polish lands
   in command-specific sub-flags (eg. `--follow` for `journal`).
+- **`fs::read_to_string` loses trailing newlines.** The framing
+  wrapper's `$(cat /tmp/out)` command substitution strips them
+  (POSIX rule). `eshell cat` papers over this by appending a `\n`
+  if missing; library callers see the bare bug. A library-level fix
+  would either teach the wrapper to preserve trailing bytes, or
+  switch `read_to_string` to the base64 path that `read` already
+  uses (byte-faithful but slower).
 - **REPL polish bundle.** `\cd <dir>` for stateful per-session cwd,
   `\reconnect` for transport recovery, graceful Ctrl-C exit instead of
   SIGINT-killing the process.

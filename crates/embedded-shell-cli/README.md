@@ -51,6 +51,7 @@ ergonomic shortcut. You'll get a clear error if you try.
 | `eshell repl [--no-history]` | Interactive line-by-line REPL. Each line runs through the framed exec protocol, so stdout, stderr, and the exit code stay cleanly separated. Built-ins are prefixed with `\` (`\help`, `\quit`, `\timeout <secs>`). Default per-command timeout is 30s; raise it for slow commands like `journalctl` on a busy device. History is persisted to `$XDG_STATE_HOME/eshell/history` unless `--no-history`. |
 | `eshell completions <shell>` | Emit a shell-completion script on stdout. Supported: `bash`, `zsh`, `fish`, `elvish`, `powershell`. See [Shell completions](#shell-completions) below for install snippets. |
 | `eshell devices [--json]` | List host-visible serial ports (`/dev/ttyUSB*` and `/dev/ttyACM*`) with their driver, USB descriptors (manufacturer/product/serial-number) walked from sysfs, and whether another process has the device open. Bridges "I plugged something in, what's the right `-p`?". Linux-only. |
+| `eshell cat PATH [PATH...] [--binary]` | Read one or more files from the device and write their contents to stdout. Multi-file invocations print `==> PATH <==` headers between files. Default text mode uses the library's `fs::read_to_string()` (UTF-8, fast); `--binary`/`-b` uses the base64 round-trip for byte-faithful binary files. Missing files print `eshell cat: PATH: <reason>` on stderr and the command exits 1 at the end. |
 
 Prepend `-p PORT` (or set `ESHELL_PORT`) to target a serial device.
 
@@ -149,6 +150,10 @@ eshell -p /dev/ttyUSB0 services --failed-only
 
 # Network state in one call
 eshell -p /dev/ttyUSB0 network
+
+# Read a file off the device
+eshell -p /dev/ttyUSB0 cat /etc/os-release
+eshell -p /dev/ttyUSB0 cat --binary /var/lib/db.sqlite > local-db.sqlite
 
 # Interactive line-by-line session on the device
 eshell -p /dev/ttyUSB0 repl

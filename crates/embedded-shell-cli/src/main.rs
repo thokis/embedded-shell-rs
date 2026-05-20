@@ -35,6 +35,7 @@ async fn main() -> ExitCode {
         Command::Repl(args) => commands::repl::run(args, port, password).await,
         Command::Completions(args) => commands::completions::run(args),
         Command::Devices(args) => commands::devices::run(args),
+        Command::Cat(args) => commands::cat::run(args, port, password).await,
     };
 
     match result {

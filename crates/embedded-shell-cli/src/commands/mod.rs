@@ -1,3 +1,4 @@
+pub mod cat;
 pub mod completions;
 pub mod devices;
 pub mod exec;

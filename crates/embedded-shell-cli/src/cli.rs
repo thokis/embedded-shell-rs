@@ -72,6 +72,9 @@ pub enum Command {
     /// process has the device open. Bridges the "I plugged something
     /// in, what's the right `-p` value?" gap.
     Devices(DevicesArgs),
+    /// Read one or more files from the device and write their contents
+    /// to stdout. Like `cat(1)`. Use `--binary` for non-text files.
+    Cat(CatArgs),
 }
 
 #[derive(Args)]
@@ -232,6 +235,18 @@ pub struct CompletionsArgs {
     /// Target shell.
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
+}
+
+#[derive(Args)]
+pub struct CatArgs {
+    /// Files to read from the device.
+    #[arg(required = true)]
+    pub paths: Vec<String>,
+    /// Use the binary-safe base64 round-trip instead of the default
+    /// UTF-8 text path. Slower but preserves bytes exactly — needed
+    /// for any non-text file.
+    #[arg(short = 'b', long)]
+    pub binary: bool,
 }
 
 #[derive(Args)]

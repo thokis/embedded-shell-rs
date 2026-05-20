@@ -7,7 +7,7 @@ Crates in this workspace:
 | [`embedded-shell`](crates/embedded-shell) | library | Async driver for Linux and U-Boot devices accessed over a serial line. `Shell` trait + concrete shells with deterministic exec framing. Documented in detail below. |
 | [`embedded-shell-linux`](crates/embedded-shell-linux) | library | Thin async wrappers around common Linux userland CLI tools, executed over any `LinuxShell`. Feature-gated per system package — see [its README](crates/embedded-shell-linux/README.md) for the module roster. |
 | [`embedded-shell-transfer`](crates/embedded-shell-transfer) | library | File push and fetch between host and device, layered on a `LinuxShell`. Two transports behind Cargo features: `http` (fast, network-required) and `serial` (slow but works without network — the bootstrap path). |
-| [`embedded-shell-cli`](crates/embedded-shell-cli) | binary (`eshell`) | Command-line driver built on top of the three libraries. `eshell exec / push / pull / info / ping / reboot / service / services / journal / modem / network / repl / completions / devices`. Useful as a daily-driver tool **and** as a reference application showing how to compose the libraries. |
+| [`embedded-shell-cli`](crates/embedded-shell-cli) | binary (`eshell`) | Command-line driver built on top of the three libraries. `eshell exec / cat / push / pull / info / ping / reboot / service / services / journal / modem / network / repl / completions / devices`. Useful as a daily-driver tool **and** as a reference application showing how to compose the libraries. |
 
 Each library crate has its own README with full API details:
 
