@@ -364,8 +364,11 @@ dependencies = [
 name = "embedded-shell-linux"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "embedded-shell",
  "regex",
+ "serde",
+ "serde_json",
  "serial_test",
  "thiserror",
  "tokio",

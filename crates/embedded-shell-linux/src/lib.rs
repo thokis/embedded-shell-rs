@@ -30,8 +30,8 @@
 //!
 //! Opt-in (not universal on minimal embedded distros):
 //!
-//! - `systemd` — enables the `systemd` module (`systemctl`,
-//!   `journalctl`, …)
+//! - `systemd` — enables the [`systemd`] module (`systemctl`) and the
+//!   [`journalctl`] module (reading the systemd journal)
 //! - `networkmanager` — enables the `networkmanager` module (`nmcli`)
 //! - `modemmanager` — enables the `modemmanager` module (`mmcli`)
 //! - `iproute2` — enables the `iproute2` module (`ip`, `ss`, `route`)
@@ -50,6 +50,9 @@ pub mod iputils;
 
 #[cfg(feature = "systemd")]
 pub mod systemd;
+
+#[cfg(feature = "systemd")]
+pub mod journalctl;
 
 #[cfg(feature = "networkmanager")]
 pub mod networkmanager;

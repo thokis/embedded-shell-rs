@@ -15,6 +15,11 @@ embedded-shell = { path = "../embedded-shell" }
 regex.workspace = true
 thiserror.workspace = true
 
+# Optional, gated by features below.
+base64 = { version = "0.22", optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
 [dev-dependencies]
 embedded-shell = { path = "../embedded-shell", features = ["test-utils"] }
 tokio = { workspace = true, features = ["test-util"] }
@@ -27,13 +32,18 @@ default = ["coreutils", "iputils"]
 
 # Grouped by the system package that provides the wrapped tools.
 # Default-on: universal on any embedded Linux (busybox or GNU).
-coreutils = []   # ls, cat, chmod, mkdir, rm, sha256sum, …
+coreutils = ["dep:base64"]   # ls, cat, chmod, mkdir, rm, sha256sum, …
+                             # base64 is needed by fs::write for the
+                             # host-side encoding before shipping to
+                             # the device's `base64 -d`.
 iputils   = []   # ping, arping
 
 # Opt-in: present on some distros but not universal in embedded.
-systemd        = []   # systemctl, journalctl, loginctl
+systemd        = ["dep:serde", "dep:serde_json"]
+                       # systemctl, journalctl, loginctl
                        # Common on Yocto-with-systemd and Debian-based;
                        # absent on OpenWrt, busybox-init Buildroot, etc.
-networkmanager = []   # nmcli
-modemmanager   = []   # mmcli
-iproute2       = []   # ip, ss, route
+                       # journalctl parsing uses `-o json` → needs serde.
+networkmanager = []   # nmcli (terse-format parsing, no extra deps)
+modemmanager   = ["dep:serde", "dep:serde_json"]   # mmcli (parses `-J` JSON output)
+iproute2       = ["dep:serde", "dep:serde_json"]   # ip, ss, route (parses `ip -j` JSON)

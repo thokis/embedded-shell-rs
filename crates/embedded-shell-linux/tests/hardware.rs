@@ -15,6 +15,16 @@
 
 use embedded_shell::shell::{Command, LinuxSerialShell, Shell};
 use embedded_shell::test_utils;
+#[cfg(feature = "iproute2")]
+use embedded_shell_linux::iproute2;
+#[cfg(feature = "systemd")]
+use embedded_shell_linux::journalctl;
+#[cfg(feature = "modemmanager")]
+use embedded_shell_linux::modemmanager;
+#[cfg(feature = "networkmanager")]
+use embedded_shell_linux::networkmanager;
+#[cfg(feature = "systemd")]
+use embedded_shell_linux::systemd;
 use embedded_shell_linux::{fs, iputils};
 use serial_test::serial;
 use tracing_subscriber::{EnvFilter, prelude::*};
@@ -211,6 +221,277 @@ async fn iputils_arping_reaches_default_gateway() {
         stats.target_mac.is_some(),
         "should have learned the gateway's MAC"
     );
+
+    shell.deactivate().await.expect("deactivate");
+}
+
+/// Probes the device for systemd. If `systemctl --version` succeeds,
+/// fetches the status of `systemd-journald.service` (universal on any
+/// systemd-running Linux) and asserts the basics. Skips if the device
+/// runs a non-systemd init (sysvinit, OpenRC, runit, busybox-init,
+/// …) — that's a fact about the device image, not a wrapper bug.
+#[cfg(feature = "systemd")]
+#[tokio::test]
+#[ignore]
+#[serial(linux_port)]
+async fn systemd_status_against_journald() {
+    init_logging();
+    let mut shell = open_linux().await;
+
+    let probe = shell
+        .run(
+            &Command::new("sh")
+                .args(["-c", "command -v systemctl >/dev/null 2>&1"])
+                .allow_nonzero(),
+        )
+        .await
+        .expect("probe for systemctl");
+    if !probe.is_success() {
+        eprintln!("[hw] device has no systemctl — skipping systemd tests");
+        shell.deactivate().await.expect("deactivate");
+        return;
+    }
+
+    let status = systemd::status(&mut shell, "systemd-journald.service")
+        .await
+        .expect("systemd-journald status");
+    eprintln!("[hw] systemd-journald status: {status:?}");
+    assert_eq!(
+        status.load_state, "loaded",
+        "journald should always be loaded on systemd"
+    );
+    assert!(
+        !status.description.is_empty(),
+        "journald should report a Description"
+    );
+
+    let active = systemd::is_active(&mut shell, "systemd-journald.service")
+        .await
+        .expect("is_active");
+    assert!(active, "journald should be active on a systemd host");
+
+    shell.deactivate().await.expect("deactivate");
+}
+
+/// Reads the tail of the journal from the device. Skips gracefully
+/// if journalctl is missing or the current user can't read the
+/// journal.
+#[cfg(feature = "systemd")]
+#[tokio::test]
+#[ignore]
+#[serial(linux_port)]
+async fn journalctl_tail_against_device() {
+    init_logging();
+    let mut shell = open_linux().await;
+
+    // Probe: does this device have journalctl and can we read it?
+    let probe = shell
+        .run(
+            &Command::new("sh")
+                .args(["-c", "journalctl -o json -n 1 >/dev/null 2>&1"])
+                .allow_nonzero(),
+        )
+        .await
+        .expect("probe journalctl");
+    if !probe.is_success() {
+        eprintln!("[hw] device has no readable journalctl — skipping");
+        shell.deactivate().await.expect("deactivate");
+        return;
+    }
+
+    let entries = journalctl::tail(&mut shell, 5)
+        .await
+        .expect("journalctl tail");
+    eprintln!("[hw] {} journal entries", entries.len());
+    for e in &entries {
+        eprintln!(
+            "[hw]   {:?} prio={:?} unit={:?}: {}",
+            e.timestamp, e.priority, e.unit, e.message
+        );
+    }
+    // Don't assert > 0 — a freshly-booted device with restrictive
+    // journal permissions could legitimately return empty. The
+    // value of the test is that the call parsed cleanly.
+
+    shell.deactivate().await.expect("deactivate");
+}
+
+/// Inspects NetworkManager state on the device. Skips gracefully if
+/// the device doesn't have nmcli or the daemon isn't running.
+#[cfg(feature = "networkmanager")]
+#[tokio::test]
+#[ignore]
+#[serial(linux_port)]
+async fn networkmanager_inspects_device_connections() {
+    init_logging();
+    let mut shell = open_linux().await;
+
+    let probe = shell
+        .run(
+            &Command::new("sh")
+                .args(["-c", "nmcli -t -f NAME connection show >/dev/null 2>&1"])
+                .allow_nonzero(),
+        )
+        .await
+        .expect("probe nmcli");
+    if !probe.is_success() {
+        eprintln!("[hw] device has no working nmcli — skipping NM tests");
+        shell.deactivate().await.expect("deactivate");
+        return;
+    }
+
+    let conns = networkmanager::connections(&mut shell)
+        .await
+        .expect("connections");
+    eprintln!("[hw] {} connections on device", conns.len());
+    for c in &conns {
+        eprintln!(
+            "[hw]   {} ({}, {}) -> {:?}",
+            c.name, c.uuid, c.kind, c.device
+        );
+    }
+
+    let active = networkmanager::active_connections(&mut shell)
+        .await
+        .expect("active connections");
+    eprintln!("[hw] {} active connections", active.len());
+    // Every active connection should be bound to a device.
+    for c in &active {
+        assert!(
+            c.is_active(),
+            "connection in --active list should have a device: {c:?}"
+        );
+    }
+
+    let devs = networkmanager::devices(&mut shell).await.expect("devices");
+    eprintln!("[hw] {} devices on device", devs.len());
+    for d in &devs {
+        eprintln!(
+            "[hw]   {} ({}) state={} -> {:?}",
+            d.name, d.kind, d.state, d.connection
+        );
+    }
+    assert!(
+        devs.iter().any(|d| d.name == "lo"),
+        "device should have a loopback in nmcli device status"
+    );
+
+    shell.deactivate().await.expect("deactivate");
+}
+
+/// Reads link / address / route state from the device. Skips if the
+/// device's `ip` doesn't speak JSON (old busybox without
+/// `CONFIG_FEATURE_IP_JSON`).
+#[cfg(feature = "iproute2")]
+#[tokio::test]
+#[ignore]
+#[serial(linux_port)]
+async fn iproute2_inspects_device_network_state() {
+    init_logging();
+    let mut shell = open_linux().await;
+
+    // Probe: does this device have `ip -j` support?
+    let probe = shell
+        .run(
+            &Command::new("sh")
+                .args(["-c", "ip -j link show >/dev/null 2>&1"])
+                .allow_nonzero(),
+        )
+        .await
+        .expect("probe ip -j");
+    if !probe.is_success() {
+        eprintln!("[hw] device has no `ip -j` JSON support — skipping iproute2 tests");
+        shell.deactivate().await.expect("deactivate");
+        return;
+    }
+
+    let links = iproute2::links(&mut shell).await.expect("links");
+    eprintln!("[hw] {} links on device", links.len());
+    for l in &links {
+        eprintln!(
+            "[hw]   {} idx={} state={} mtu={} mac={:?}",
+            l.name, l.index, l.operstate, l.mtu, l.mac
+        );
+    }
+    assert!(
+        links.iter().any(|l| l.name == "lo"),
+        "device should have a loopback interface"
+    );
+
+    let addrs = iproute2::addresses(&mut shell).await.expect("addresses");
+    eprintln!("[hw] {} addresses on device", addrs.len());
+    for a in &addrs {
+        eprintln!(
+            "[hw]   {} {}/{} on {} ({})",
+            a.family, a.address, a.prefix_len, a.interface, a.scope
+        );
+    }
+    assert!(
+        addrs
+            .iter()
+            .any(|a| a.address == "127.0.0.1" && a.interface == "lo"),
+        "device should have 127.0.0.1 on lo"
+    );
+
+    let routes = iproute2::routes(&mut shell).await.expect("routes");
+    eprintln!("[hw] {} routes on device", routes.len());
+    for r in &routes {
+        eprintln!(
+            "[hw]   {} via {:?} dev {} metric {:?}",
+            r.destination, r.gateway, r.interface, r.metric
+        );
+    }
+
+    shell.deactivate().await.expect("deactivate");
+}
+
+/// Inspects ModemManager state on the device. Skips gracefully if
+/// mmcli isn't installed or the daemon isn't running. Useful even
+/// when the device has zero modems — exercises the empty-list
+/// parse path.
+#[cfg(feature = "modemmanager")]
+#[tokio::test]
+#[ignore]
+#[serial(linux_port)]
+async fn modemmanager_inspects_device_modems() {
+    init_logging();
+    let mut shell = open_linux().await;
+
+    let probe = shell
+        .run(
+            &Command::new("sh")
+                .args(["-c", "mmcli -L -J >/dev/null 2>&1"])
+                .allow_nonzero(),
+        )
+        .await
+        .expect("probe mmcli");
+    if !probe.is_success() {
+        eprintln!("[hw] device has no working mmcli — skipping MM tests");
+        shell.deactivate().await.expect("deactivate");
+        return;
+    }
+
+    let indices = modemmanager::list_modems(&mut shell)
+        .await
+        .expect("list_modems");
+    eprintln!("[hw] {} modem(s) on device", indices.len());
+
+    for idx in indices {
+        let m = modemmanager::modem(&mut shell, idx).await.expect("modem");
+        eprintln!(
+            "[hw]   modem {}: {} {} (rev {}) state={} tech={:?} signal={:?}% op={:?}",
+            m.index,
+            m.manufacturer.as_deref().unwrap_or("?"),
+            m.model.as_deref().unwrap_or("?"),
+            m.revision.as_deref().unwrap_or("?"),
+            m.state,
+            m.access_technologies,
+            m.signal_quality,
+            m.operator_name,
+        );
+        // Sanity check on the basics we expect from any real modem.
+        assert!(!m.state.is_empty(), "modem state should not be empty");
+    }
 
     shell.deactivate().await.expect("deactivate");
 }
