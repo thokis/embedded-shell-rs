@@ -50,6 +50,7 @@ ergonomic shortcut. You'll get a clear error if you try.
 | `eshell network [--json]` | Comprehensive network state in four sections: `Links` (kernel view, with UP/DOWN/UNKNOWN colored on a TTY), `Addresses` (global + host scope only — link-local noise hidden), `Default route`, and `Connections` (NetworkManager active connections). Gracefully degrades to NM-only on devices whose `ip` lacks JSON support. |
 | `eshell repl [--no-history]` | Interactive line-by-line REPL. Each line runs through the framed exec protocol, so stdout, stderr, and the exit code stay cleanly separated. Built-ins are prefixed with `\` (`\help`, `\quit`, `\timeout <secs>`). Default per-command timeout is 30s; raise it for slow commands like `journalctl` on a busy device. History is persisted to `$XDG_STATE_HOME/eshell/history` unless `--no-history`. |
 | `eshell completions <shell>` | Emit a shell-completion script on stdout. Supported: `bash`, `zsh`, `fish`, `elvish`, `powershell`. See [Shell completions](#shell-completions) below for install snippets. |
+| `eshell devices [--json]` | List host-visible serial ports (`/dev/ttyUSB*` and `/dev/ttyACM*`) with their driver, USB descriptors (manufacturer/product/serial-number) walked from sysfs, and whether another process has the device open. Bridges "I plugged something in, what's the right `-p`?". Linux-only. |
 
 Prepend `-p PORT` (or set `ESHELL_PORT`) to target a serial device.
 

@@ -214,7 +214,8 @@ embedded-shell-rs/                    ← workspace root
                 ├── modem.rs           ← `mmcli` modem + SIM details
                 ├── network.rs         ← combined iproute2 + NetworkManager view
                 ├── repl.rs            ← rustyline-backed interactive REPL
-                └── completions.rs    ← shell-completion script generation
+                ├── completions.rs    ← shell-completion script generation
+                └── devices.rs        ← list /dev/ttyUSB*+ACM* with USB descriptors
 ```
 
 ## Planned work in this workspace

@@ -34,6 +34,7 @@ async fn main() -> ExitCode {
         Command::Network(args) => commands::network::run(args, port, password).await,
         Command::Repl(args) => commands::repl::run(args, port, password).await,
         Command::Completions(args) => commands::completions::run(args),
+        Command::Devices(args) => commands::devices::run(args),
     };
 
     match result {

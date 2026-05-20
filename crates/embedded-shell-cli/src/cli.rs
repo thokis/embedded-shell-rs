@@ -67,6 +67,11 @@ pub enum Command {
     /// Pipe to the path your shell expects (see the crate README for
     /// the per-shell install snippet).
     Completions(CompletionsArgs),
+    /// List serial devices visible to the host (`/dev/ttyUSB*` and
+    /// `/dev/ttyACM*`) with their USB descriptors and whether another
+    /// process has the device open. Bridges the "I plugged something
+    /// in, what's the right `-p` value?" gap.
+    Devices(DevicesArgs),
 }
 
 #[derive(Args)]
@@ -227,6 +232,14 @@ pub struct CompletionsArgs {
     /// Target shell.
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
+}
+
+#[derive(Args)]
+pub struct DevicesArgs {
+    /// Emit `[{path, driver, vendor, product, manufacturer, serial,
+    /// claimed_by}, …]` as JSON instead of the human-readable table.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args)]

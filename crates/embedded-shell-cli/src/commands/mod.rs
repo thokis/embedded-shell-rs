@@ -1,4 +1,5 @@
 pub mod completions;
+pub mod devices;
 pub mod exec;
 pub mod info;
 pub mod journal;
