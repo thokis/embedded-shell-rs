@@ -1,0 +1,39 @@
+[package]
+name = "embedded-shell-linux"
+version = "0.1.0"
+description = "Thin async wrappers around common Linux userland CLI tools, executed over an `embedded-shell` `LinuxShell`."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Build docs.rs with all features so feature-gated modules show up.
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+embedded-shell = { path = "../embedded-shell" }
+regex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+embedded-shell = { path = "../embedded-shell", features = ["test-utils"] }
+tokio = { workspace = true, features = ["test-util"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serial_test.workspace = true
+
+[features]
+default = ["coreutils", "iputils"]
+
+# Grouped by the system package that provides the wrapped tools.
+# Default-on: universal on any embedded Linux (busybox or GNU).
+coreutils = []   # ls, cat, chmod, mkdir, rm, sha256sum, …
+iputils   = []   # ping, arping
+
+# Opt-in: present on some distros but not universal in embedded.
+systemd        = []   # systemctl, journalctl, loginctl
+                       # Common on Yocto-with-systemd and Debian-based;
+                       # absent on OpenWrt, busybox-init Buildroot, etc.
+networkmanager = []   # nmcli
+modemmanager   = []   # mmcli
+iproute2       = []   # ip, ss, route

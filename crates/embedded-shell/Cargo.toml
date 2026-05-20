@@ -1,0 +1,41 @@
+[package]
+name = "embedded-shell"
+version = "0.1.0"
+description = "Async driver for Linux and U-Boot devices accessed over a serial line."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-serial.workspace = true
+tracing.workspace = true
+
+[features]
+# Expose the `test_utils` module. Helpers for hardware-in-the-loop
+# tests built on top of this crate — state-aware shell-opening probes,
+# Linux↔U-Boot transition logic. Library users writing hardware tests
+# should enable this in their dev-dependencies.
+test-utils = []
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber.workspace = true
+serial_test.workspace = true
+
+# Each hardware test binary needs the test-utils helpers, so cargo
+# skips them unless the feature is enabled (e.g. via --all-features
+# or --features test-utils).
+[[test]]
+name = "hardware_linux"
+required-features = ["test-utils"]
+
+[[test]]
+name = "hardware_uboot"
+required-features = ["test-utils"]

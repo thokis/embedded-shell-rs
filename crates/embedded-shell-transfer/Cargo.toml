@@ -1,0 +1,52 @@
+[package]
+name = "embedded-shell-transfer"
+version = "0.1.0"
+description = "File push and fetch over an `embedded-shell`, with HTTP and raw-serial transports."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+embedded-shell = { path = "../embedded-shell" }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# Optional, gated by features below.
+base64 = { version = "0.22", optional = true }
+hyper = { version = "1", optional = true, features = ["server", "http1"] }
+hyper-util = { version = "0.1", optional = true, features = ["tokio"] }
+http-body-util = { version = "0.1", optional = true }
+local-ip-address = { version = "0.6", optional = true }
+bytes = { version = "1", optional = true }
+sha2 = { version = "0.10", optional = true }
+
+[dev-dependencies]
+embedded-shell = { path = "../embedded-shell", features = ["test-utils"] }
+tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber.workspace = true
+serial_test.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+
+[features]
+default = ["http"]
+# HTTP transport (host-side hyper server + device-side curl/wget).
+# Fast on Ethernet (~10 MB/s on 100 Mbit). Requires the device to have
+# `curl` or `wget` and a network route back to the host.
+http = [
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:http-body-util",
+    "dep:local-ip-address",
+    "dep:bytes",
+    "dep:sha2",
+]
+# Raw-serial transport (base64 over the shell line). Slow (~10 KB/s
+# effective at 115200 baud after base64 overhead) but works without any
+# network configuration. The bootstrap path for devices with no
+# Ethernet / WiFi / SSH yet.
+serial = ["dep:base64", "dep:sha2"]
