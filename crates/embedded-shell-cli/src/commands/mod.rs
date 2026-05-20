@@ -1,3 +1,4 @@
+pub mod completions;
 pub mod exec;
 pub mod info;
 pub mod journal;

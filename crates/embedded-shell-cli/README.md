@@ -49,6 +49,7 @@ ergonomic shortcut. You'll get a clear error if you try.
 | `eshell modem [-m INDEX] [--no-sim] [--json]` | Modem + primary-SIM details from ModemManager. Without `-m`, the first modem mmcli reports is used; pass `-m 1` (etc.) on multi-modem devices. `--no-sim` skips the SIM lookup. |
 | `eshell network [--json]` | Comprehensive network state: kernel-view (`ip -j` links/addresses/routes) and NM-view (`nmcli` connections) side by side. Gracefully degrades to NM-only on devices whose `ip` lacks JSON support. |
 | `eshell repl [--no-history]` | Interactive line-by-line REPL. Each line runs through the framed exec protocol, so stdout, stderr, and the exit code stay cleanly separated. Built-ins are prefixed with `\` (`\help`, `\quit`, `\timeout <secs>`). Default per-command timeout is 30s; raise it for slow commands like `journalctl` on a busy device. History is persisted to `$XDG_STATE_HOME/eshell/history` unless `--no-history`. |
+| `eshell completions <shell>` | Emit a shell-completion script on stdout. Supported: `bash`, `zsh`, `fish`, `elvish`, `powershell`. See [Shell completions](#shell-completions) below for install snippets. |
 
 Prepend `-p PORT` (or set `ESHELL_PORT`) to target a serial device.
 
@@ -151,6 +152,32 @@ eshell -p /dev/ttyUSB0 network
 # Interactive line-by-line session on the device
 eshell -p /dev/ttyUSB0 repl
 ```
+
+## Shell completions
+
+Pick the matching snippet for your shell and run it once:
+
+```sh
+# bash (user-local)
+mkdir -p ~/.local/share/bash-completion/completions
+eshell completions bash > ~/.local/share/bash-completion/completions/eshell
+
+# zsh — append to a directory on $fpath, then `compinit`
+mkdir -p ~/.zsh/completions
+eshell completions zsh > ~/.zsh/completions/_eshell
+# (add `fpath=(~/.zsh/completions $fpath)` + `autoload -Uz compinit && compinit`
+#  to your .zshrc if it isn't already)
+
+# fish — autoloads from this path
+mkdir -p ~/.config/fish/completions
+eshell completions fish > ~/.config/fish/completions/eshell.fish
+
+# powershell — source from your profile
+eshell completions powershell | Out-String | Invoke-Expression
+```
+
+Re-run the command after upgrading `eshell` to pick up new subcommand
+flags.
 
 ## Exit codes
 

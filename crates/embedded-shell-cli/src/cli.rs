@@ -63,6 +63,10 @@ pub enum Command {
     /// uses, so stdout, stderr, and the exit code stay cleanly
     /// separated per command.
     Repl(ReplArgs),
+    /// Print a shell-completion script for the chosen shell to stdout.
+    /// Pipe to the path your shell expects (see the crate README for
+    /// the per-shell install snippet).
+    Completions(CompletionsArgs),
 }
 
 #[derive(Args)]
@@ -216,6 +220,13 @@ pub struct ModemArgs {
     /// Emit the modem (and SIM) details as JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args)]
+pub struct CompletionsArgs {
+    /// Target shell.
+    #[arg(value_enum)]
+    pub shell: clap_complete::Shell,
 }
 
 #[derive(Args)]
