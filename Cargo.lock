@@ -403,6 +403,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-shell-cmdtree"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "embedded-shell",
+ "embedded-shell-linux",
+ "rustyline",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "embedded-shell-linux"
 version = "0.1.0"
 dependencies = [

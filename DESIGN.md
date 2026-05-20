@@ -779,6 +779,51 @@ method with a sensible default removes that friction.
 
 ---
 
+## D-019 — Command-tree shell as a separate crate + binary
+
+**Decision:** A new workspace crate `embedded-shell-cmdtree` ships a
+generic hierarchical command-tree shell engine (`CommandTree`,
+`Node`, `Leaf`, `Handler`, `Repl`, parser, completer). A bundled
+`demo` feature populates the tree with reference nodes (`/info`,
+`/network`) and a binary called `etree`. Domain-specific subtrees
+(LBEL-specific commands, MDG-context operations) live in downstream
+crates that disable the `demo` feature and mount their own content
+via `CommandTree::mount`.
+
+**Context:** `eshell repl` covers "scriptable per-line exec" well but
+overlaps with `tio` for interactive use. A different shell paradigm —
+RouterOS-style hierarchical command tree with tab-completion and
+inline help — targets a different persona: developers debugging a
+device who don't want to remember the underlying shell vocabulary.
+The persona shift means a different product, not a different mode
+of the same product.
+
+**Alternatives considered:**
+
+- Bake the cmdtree into `embedded-shell-cli` as another subcommand
+  (`eshell tree`). Rejected: forces the cli crate to depend on the
+  whole tree-engine + completer infrastructure; muddles the cli's
+  "one shot per subcommand" model.
+- Single binary that switches modes by flag. Rejected: same crate
+  bloat, plus a UX seam between modes.
+- Put everything in `embedded-shell` itself. Rejected: the engine
+  is presentation logic, not transport — keeps the foundation crate
+  focused on the `Shell` trait.
+
+**Consequences:**
+
+- Workspace gains a fifth crate. Builds + CI scale linearly.
+- The engine compiles without `embedded-shell-linux` when `demo` is
+  off — downstream consumers pull in only what their tree needs.
+- The `etree` binary requires `demo` (`required-features = ["demo"]`).
+  Downstream replacements ship their own binary and don't conflict.
+- The bundled tree is deliberately tiny (`/info`, `/network`) so the
+  crate stays a reference impl rather than slowly becoming a second
+  product. Polish lands downstream.
+- Implemented in `crates/embedded-shell-cmdtree/`.
+
+---
+
 ## D-099 — `embedded-shell-transfer` crate (push/fetch, multi-transport)
 
 **Decision:** A third workspace crate for file push/fetch, implementing

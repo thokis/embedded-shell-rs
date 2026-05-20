@@ -8,6 +8,7 @@ Crates in this workspace:
 | [`embedded-shell-linux`](crates/embedded-shell-linux) | library | Thin async wrappers around common Linux userland CLI tools, executed over any `LinuxShell`. Feature-gated per system package — see [its README](crates/embedded-shell-linux/README.md) for the module roster. |
 | [`embedded-shell-transfer`](crates/embedded-shell-transfer) | library | File push and fetch between host and device, layered on a `LinuxShell`. Two transports behind Cargo features: `http` (fast, network-required) and `serial` (slow but works without network — the bootstrap path). |
 | [`embedded-shell-cli`](crates/embedded-shell-cli) | binary (`eshell`) | Command-line driver built on top of the three libraries. `eshell exec / cat / push / pull / info / ping / reboot / service / services / journal / modem / network / repl / completions / devices`. Useful as a daily-driver tool **and** as a reference application showing how to compose the libraries. |
+| [`embedded-shell-cmdtree`](crates/embedded-shell-cmdtree) | library + binary (`etree`) | Hierarchical command-tree shell engine, inspired by MikroTik RouterOS. `CommandTree` / `Leaf` / `Handler` / `Repl` primitives. The `demo` feature bundles `/info` and `/network` as a reference tree; downstream crates disable the feature and mount their own subtrees. Different persona than `eshell` — for *navigating* the device rather than scripting it. |
 
 Each library crate has its own README with full API details:
 
@@ -15,6 +16,7 @@ Each library crate has its own README with full API details:
 - [`crates/embedded-shell-linux/README.md`](crates/embedded-shell-linux/README.md) — module roster, feature flags, why read-only by default
 - [`crates/embedded-shell-transfer/README.md`](crates/embedded-shell-transfer/README.md) — HTTP vs serial transport, event schema
 - [`crates/embedded-shell-cli/README.md`](crates/embedded-shell-cli/README.md) — every `eshell` subcommand, local mode, transport fallback
+- [`crates/embedded-shell-cmdtree/README.md`](crates/embedded-shell-cmdtree/README.md) — command-tree engine + `etree` binary, downstream extension API
 
 The rest of this document covers the workspace itself: how to build,
 how to run the tests (including hardware-in-the-loop), CI, and

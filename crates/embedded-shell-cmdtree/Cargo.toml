@@ -1,0 +1,31 @@
+[package]
+name = "embedded-shell-cmdtree"
+version = "0.1.0"
+description = "Hierarchical command-tree shell engine for embedded-shell — generic Node/Leaf/Repl primitives plus a small reference tree (`/info`, `/network`). Downstream crates mount their own subtrees."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "etree"
+path = "src/main.rs"
+required-features = ["demo"]
+
+[dependencies]
+embedded-shell = { path = "../embedded-shell" }
+anyhow.workspace = true
+async-trait.workspace = true
+clap.workspace = true
+rustyline = { version = "18", default-features = false, features = ["with-file-history"] }
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Demo tree: wraps a handful of `embedded-shell-linux` modules so the
+# binary has something interactive to show. Downstream consumers
+# disable this feature and mount their own subtrees.
+embedded-shell-linux = { path = "../embedded-shell-linux", optional = true, features = ["iproute2", "networkmanager", "coreutils"] }
+
+[features]
+default = ["demo"]
+demo = ["dep:embedded-shell-linux"]

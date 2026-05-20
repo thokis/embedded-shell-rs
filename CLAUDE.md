@@ -193,30 +193,36 @@ embedded-shell-rs/                    ← workspace root
     │       ├── error.rs               ← TransferError + Result
     │       ├── http.rs                ← hyper server on host + wget/curl on device
     │       └── serial.rs              ← base64 over the shell line
-    └── embedded-shell-cli/            ← CLI built on top of the three libraries (binary: `eshell`)
-        ├── Cargo.toml
-        ├── README.md
+    ├── embedded-shell-cli/            ← CLI built on top of the three libraries (binary: `eshell`)
+    │   ├── Cargo.toml
+    │   ├── README.md
+    │   └── src/
+    │       ├── main.rs                ← tracing init + subcommand dispatch
+    │       ├── cli.rs                 ← clap-derive subcommand structs
+    │       ├── shell.rs               ← shared open_linux() helper
+    │       └── commands/              ← one file per subcommand
+    │           ├── mod.rs
+    │           ├── exec.rs
+    │           ├── push.rs            ← HTTP-first with serial fallback
+    │           ├── pull.rs            ← HTTP-first with serial fallback
+    │           ├── info.rs            ← sectioned summary (System/Storage/Interfaces)
+    │           ├── ping.rs
+    │           ├── reboot.rs
+    │           ├── service.rs         ← single systemd unit (status / start / …)
+    │           ├── services.rs        ← units grouped by active state (`Failed`/`Active`/…)
+    │           ├── journal.rs         ← `journalctl` tail / since / unit
+    │           ├── modem.rs           ← `mmcli` modem + SIM details
+    │           ├── network.rs         ← combined iproute2 + NetworkManager view
+    │           ├── repl.rs            ← rustyline-backed interactive REPL
+    │           ├── completions.rs    ← shell-completion script generation
+    │           ├── devices.rs        ← list /dev/ttyUSB*+ACM* with USB descriptors
+    │           └── cat.rs            ← read files (text + binary base64) from the device
+    └── embedded-shell-cmdtree/        ← Hierarchical command-tree shell engine (binary: `etree`)
+        ├── Cargo.toml                  (`etree` requires the `demo` feature)
         └── src/
-            ├── main.rs                ← tracing init + subcommand dispatch
-            ├── cli.rs                 ← clap-derive subcommand structs
-            ├── shell.rs               ← shared open_linux() helper
-            └── commands/              ← one file per subcommand
-                ├── mod.rs
-                ├── exec.rs
-                ├── push.rs            ← HTTP-first with serial fallback
-                ├── pull.rs            ← HTTP-first with serial fallback
-                ├── info.rs            ← sectioned summary (System/Storage/Interfaces)
-                ├── ping.rs
-                ├── reboot.rs
-                ├── service.rs         ← single systemd unit (status / start / …)
-                ├── services.rs        ← units grouped by active state (`Failed`/`Active`/…)
-                ├── journal.rs         ← `journalctl` tail / since / unit
-                ├── modem.rs           ← `mmcli` modem + SIM details
-                ├── network.rs         ← combined iproute2 + NetworkManager view
-                ├── repl.rs            ← rustyline-backed interactive REPL
-                ├── completions.rs    ← shell-completion script generation
-                ├── devices.rs        ← list /dev/ttyUSB*+ACM* with USB descriptors
-                └── cat.rs            ← read files (text + binary base64) from the device
+            ├── lib.rs                 ← CommandTree, Node, Leaf, Handler, Repl, parser, completer
+            ├── demo.rs                ← reference tree: /info + /network (feature-gated)
+            └── main.rs                ← `etree` binary entry point
 ```
 
 ## Planned work in this workspace
