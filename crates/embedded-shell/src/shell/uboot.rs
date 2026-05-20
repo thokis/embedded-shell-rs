@@ -422,6 +422,12 @@ impl Shell for UBootSerialShell {
     async fn run(&mut self, command: &Command) -> Result<ShellResult, ShellError> {
         self.exec_framed(command).await
     }
+
+    async fn reconnect(&mut self) -> Result<(), ShellError> {
+        // Delegate to the inherent method so callers can use either
+        // the trait (eg. via `dyn Shell`) or the concrete shell.
+        UBootSerialShell::reconnect(self).await
+    }
 }
 
 fn cap_buffer(buf: &mut Vec<u8>, max: usize) {

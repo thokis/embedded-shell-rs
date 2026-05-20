@@ -762,6 +762,12 @@ impl Shell for LinuxSerialShell {
     async fn run(&mut self, command: &Command) -> Result<ShellResult, ShellError> {
         self.run_with_recovery(command).await
     }
+
+    async fn reconnect(&mut self) -> Result<(), ShellError> {
+        // Delegate to the inherent method so callers can use either
+        // the trait (eg. via `dyn Shell`) or the concrete shell.
+        LinuxSerialShell::reconnect(self).await
+    }
 }
 
 /// Predicate for `read_until`: returns the offset just past the third

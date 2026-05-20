@@ -238,9 +238,13 @@ embedded-shell-rs/                    ← workspace root
   would either teach the wrapper to preserve trailing bytes, or
   switch `read_to_string` to the base64 path that `read` already
   uses (byte-faithful but slower).
-- **REPL polish bundle.** `\cd <dir>` for stateful per-session cwd,
-  `\reconnect` for transport recovery, graceful Ctrl-C exit instead of
-  SIGINT-killing the process.
+- **Library: cancellation on `Shell::run`.** REPL races `run()`
+  against `tokio::signal::ctrl_c()` and drops the future on Ctrl-C
+  to exit gracefully; the device-side command may still finish. A
+  library-level fix would pass a `tokio_util::sync::CancellationToken`
+  into `run()` and have the framed-exec layer send `\x03` plus drain
+  to the next prompt — properly aborts the device-side command and
+  leaves the transport in a known-good state.
 - **Publishing prep.** Cargo.toml metadata audit, `CHANGELOG.md`,
   `cargo publish --dry-run` per crate to surface blockers before 0.1.
 - **Polish across existing wrapper modules**: `networkmanager::wifi_list`,

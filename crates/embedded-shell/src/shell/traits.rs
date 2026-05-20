@@ -121,4 +121,27 @@ pub trait Shell: Send {
     ///   expires waiting for the framed response.
     /// - [`ShellError::Io`] on transport-level failures.
     async fn run(&mut self, command: &Command) -> Result<ShellResult, ShellError>;
+
+    /// Close the transport and bring the shell back up.
+    ///
+    /// For serial-backed shells this re-opens the port with the same
+    /// configuration and re-runs the activate state machine in one
+    /// shot — useful after a USB unplug or device reboot.
+    ///
+    /// The default implementation returns
+    /// [`ShellError::Initialization`] because most shells have nothing
+    /// to reconnect to. [`SubprocessShell`][super::SubprocessShell]
+    /// inherits this default. [`LinuxSerialShell`][super::LinuxSerialShell]
+    /// and [`UBootSerialShell`][super::UBootSerialShell] override it.
+    ///
+    /// # Errors
+    ///
+    /// - [`ShellError::Initialization`] when the shell type has no
+    ///   reconnect concept, or when re-activation fails.
+    /// - [`ShellError::Io`] on transport-level failures.
+    async fn reconnect(&mut self) -> Result<(), ShellError> {
+        Err(ShellError::initialization(
+            "this shell does not support reconnect",
+        ))
+    }
 }

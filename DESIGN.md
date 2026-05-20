@@ -736,6 +736,49 @@ session.
 
 ---
 
+## D-018 — `reconnect` lives on the `Shell` trait with an erroring default
+
+**Decision:** Promote `reconnect()` from a method on
+`LinuxSerialShell` / `UBootSerialShell` (inherent) to a method on the
+`Shell` trait, with a default implementation that returns
+`ShellError::Initialization("this shell does not support reconnect")`.
+The two serial shells override with thin shims delegating to their
+existing inherent methods; `SubprocessShell` inherits the default
+(there's no transport to reconnect to).
+
+**Context:** Callers that hold a `Box<dyn LinuxShell>` (the CLI's
+`open_linux()` return type, the REPL, the runbook engine if it ever
+ships) had no way to reach `reconnect` through a trait object. They
+needed the concrete type at the call site, which forced the
+`open_linux()` helper to return an enum or downcast pattern. A trait
+method with a sensible default removes that friction.
+
+**Alternatives considered:**
+
+- New marker trait `Reconnectable: Shell`. Rejected: requires
+  downcasting `dyn Shell` to `dyn Reconnectable`, which Rust doesn't
+  do for trait objects without `Any`.
+- Leave inherent-only and have the CLI track the concrete type.
+  Rejected: hard-codes the assumption that local-mode never reconnects
+  (currently true; might change if e.g. SubprocessShell ever spawns
+  a child that can die).
+- Return `Result<(), Unsupported>` for the default. Rejected:
+  introducing a new error variant for one signal is heavier than
+  reusing `Initialization` with a clear message.
+
+**Consequences:**
+
+- The `Shell` trait gains one method. Minor-version-compatible
+  addition — existing impls compile unchanged because the default
+  applies.
+- The inherent methods on the two serial shells stay (callers can
+  still write `LinuxSerialShell::reconnect(&mut s).await`); the
+  trait impls delegate to them so there's a single source of truth.
+- Implemented in `crates/embedded-shell/src/shell/traits.rs`
+  (trait method + default), `linux.rs` and `uboot.rs` (overrides).
+
+---
+
 ## D-099 — `embedded-shell-transfer` crate (push/fetch, multi-transport)
 
 **Decision:** A third workspace crate for file push/fetch, implementing
