@@ -25,9 +25,11 @@
 //!
 //! [`LinuxShell`]: embedded_shell::shell::LinuxShell
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use embedded_shell::shell::{Command, LinuxShell};
+use regex::Regex;
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
@@ -341,7 +343,13 @@ pub async fn list_units(
 }
 
 fn parse_list_units_output(stdout: &str) -> Result<Vec<UnitListEntry>> {
-    let raw: Vec<RawUnitListEntry> = serde_json::from_str(stdout)
+    // systemctl emits non-standard `\xNN` escapes inside JSON string
+    // values for characters that are special in systemd unit naming
+    // (most commonly `-` → `\x2d` in device-class unit names). Per
+    // RFC 8259 the only valid arbitrary-char escape in JSON is
+    // `\uXXXX`. Convert before handing to serde_json.
+    let sanitized = sanitize_systemd_json(stdout);
+    let raw: Vec<RawUnitListEntry> = serde_json::from_str(&sanitized)
         .map_err(|e| Error::Parse(format!("systemctl list-units json: {e}; got {stdout:?}")))?;
     Ok(raw
         .into_iter()
@@ -353,6 +361,30 @@ fn parse_list_units_output(stdout: &str) -> Result<Vec<UnitListEntry>> {
             description: r.description,
         })
         .collect())
+}
+
+/// Rewrites systemd-style `\xNN` escapes inside a JSON document to
+/// the RFC-8259-compliant `\u00NN` form.
+///
+/// systemd uses `\xNN` (two hex digits) to encode characters that
+/// are special in its unit-name convention — the path separator
+/// `-` becomes `\x2d` in unit names like
+/// `system-serial\x2dgetty.slice`. Standard JSON only accepts
+/// `\uXXXX`, so serde_json rejects the raw output. This regex
+/// pass is the minimum mechanical transformation that makes the
+/// output parseable.
+///
+/// Safe because:
+/// 1. systemd unit names never contain a literal backslash.
+/// 2. Descriptions could in principle contain `\x` substrings, but
+///    in practice they don't (systemd descriptions are human prose).
+/// 3. If a `\xNN` *did* legitimately appear, the substitution
+///    `\u00NN` produces the same character anyway.
+fn sanitize_systemd_json(s: &str) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re =
+        RE.get_or_init(|| Regex::new(r"\\x([0-9a-fA-F]{2})").expect("systemd-xhex regex is valid"));
+    re.replace_all(s, "\\u00$1").into_owned()
 }
 
 #[derive(Deserialize)]
@@ -527,6 +559,32 @@ Description=One-shot job that's done
     fn rejects_malformed_list_units_output() {
         let err = parse_list_units_output("not json").unwrap_err();
         assert!(matches!(err, Error::Parse(_)));
+    }
+
+    #[test]
+    fn parses_systemd_xhex_escapes_in_unit_names() {
+        // systemctl emits `\x2d` (i.e. `-`) inside device-class unit
+        // names like the slice for serial-getty or USB device paths.
+        // Standard serde_json rejects this; the sanitiser converts
+        // `\xNN` → `\u00NN` before the parse.
+        let input = r#"[
+            {"unit":"system-serial\x2dgetty.slice","load":"loaded","active":"active","sub":"active","description":"Slice /system/serial-getty"},
+            {"unit":"sys-devices-virtual-block-dm\x2d0.device","load":"loaded","active":"active","sub":"plugged","description":"/sys/devices/virtual/block/dm-0"}
+        ]"#;
+        let entries = parse_list_units_output(input).unwrap();
+        assert_eq!(entries.len(), 2);
+        // `\x2d` decoded to literal `-`.
+        assert_eq!(entries[0].unit, "system-serial-getty.slice");
+        assert_eq!(entries[1].unit, "sys-devices-virtual-block-dm-0.device");
+    }
+
+    #[test]
+    fn sanitizer_handles_multiple_xhex_in_one_value() {
+        let input = r#"[
+            {"unit":"a\x2db\x2dc.device","load":"loaded","active":"active","sub":"plugged","description":"x"}
+        ]"#;
+        let entries = parse_list_units_output(input).unwrap();
+        assert_eq!(entries[0].unit, "a-b-c.device");
     }
 
     #[tokio::test]
