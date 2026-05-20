@@ -164,6 +164,56 @@ pub async fn tail_unit(
     parse_jsonl(&output)
 }
 
+/// Returns every journal entry since `since`, regardless of source.
+///
+/// `since` is passed verbatim to `journalctl --since` and accepts
+/// every form it does: absolute timestamps (`"2024-01-15 09:00:00"`,
+/// `"2024-01-15"`), relative expressions (`"1 hour ago"`, `"yesterday"`,
+/// `"-15m"`), or the special tokens `"now"` and `"today"`.
+///
+/// Equivalent to `journalctl -o json --no-pager --since=<since>`.
+///
+/// # Errors
+///
+/// As for [`tail`], plus a [`Error::Shell`] for malformed `since`
+/// expressions that journalctl rejects.
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::journalctl;
+///
+/// // Everything since the last reboot's worth of activity.
+/// let recent = journalctl::tail_since(&mut shell, "1 hour ago").await?;
+/// ```
+pub async fn tail_since(shell: &mut dyn LinuxShell, since: &str) -> Result<Vec<LogEntry>> {
+    let output = run_journalctl_json(shell, &["--since", since]).await?;
+    parse_jsonl(&output)
+}
+
+/// Returns journal entries from one systemd unit since `since`.
+///
+/// Combines the filters of [`tail_unit`] and [`tail_since`].
+/// Equivalent to `journalctl -o json --no-pager -u <unit> --since=<since>`.
+///
+/// # Errors
+///
+/// As for [`tail_since`].
+///
+/// # Example
+///
+/// ```ignore
+/// let entries = journalctl::tail_unit_since(&mut shell, "sshd.service", "yesterday").await?;
+/// ```
+pub async fn tail_unit_since(
+    shell: &mut dyn LinuxShell,
+    unit: &str,
+    since: &str,
+) -> Result<Vec<LogEntry>> {
+    let output = run_journalctl_json(shell, &["-u", unit, "--since", since]).await?;
+    parse_jsonl(&output)
+}
+
 async fn run_journalctl_json(shell: &mut dyn LinuxShell, extra_args: &[&str]) -> Result<String> {
     let mut cmd = Command::new("journalctl")
         .arg("-o")
@@ -368,6 +418,27 @@ mod tests {
             assert!(
                 entry.timestamp.duration_since(UNIX_EPOCH).is_ok(),
                 "every entry has a valid timestamp"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn tail_since_via_subprocess_shell() {
+        if !host_can_read_journal() {
+            eprintln!("skipping: host can't read journal");
+            return;
+        }
+        let mut shell = embedded_shell::shell::SubprocessShell::new();
+        // Anything within the last hour. May be empty (idle host) but
+        // must parse cleanly.
+        let entries = tail_since(&mut shell, "1 hour ago").await.unwrap();
+        eprintln!("[test] {} entries since 1 hour ago", entries.len());
+        let one_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        for entry in &entries {
+            assert!(
+                entry.timestamp >= one_hour_ago,
+                "entry timestamp before the window: {:?}",
+                entry.timestamp
             );
         }
     }

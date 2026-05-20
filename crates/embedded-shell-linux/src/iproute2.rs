@@ -195,6 +195,35 @@ pub async fn routes(shell: &mut dyn LinuxShell) -> Result<Vec<Route>> {
     Ok(raw.into_iter().map(Route::from).collect())
 }
 
+/// Convenience: returns the default route, if any.
+///
+/// Equivalent to `routes(...).await?.into_iter().find(|r| r.destination == "default")`.
+/// Useful for the very common "what's this device's gateway?" question.
+///
+/// Returns `Ok(None)` when the device has no default route configured
+/// — not an error, just a fact about the network state.
+///
+/// # Errors
+///
+/// As for [`routes`].
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::iproute2;
+///
+/// match iproute2::default_route(&mut shell).await? {
+///     Some(r) => println!("gateway {} via {}", r.gateway.as_deref().unwrap_or("?"), r.interface),
+///     None => println!("no default route"),
+/// }
+/// ```
+pub async fn default_route(shell: &mut dyn LinuxShell) -> Result<Option<Route>> {
+    Ok(routes(shell)
+        .await?
+        .into_iter()
+        .find(|r| r.destination == "default"))
+}
+
 async fn run_ip_json(shell: &mut dyn LinuxShell, args: &[&str]) -> Result<String> {
     let mut cmd = Command::new("ip");
     for a in args {
@@ -454,5 +483,21 @@ mod tests {
         // serializes cleanly — content is environment-dependent.
         let routes = routes(&mut shell).await.unwrap();
         eprintln!("[test] {} routes on host", routes.len());
+    }
+
+    #[tokio::test]
+    async fn default_route_returns_dst_default_or_none() {
+        if !host_has_ip_json() {
+            eprintln!("skipping: host doesn't have `ip` with `-j` support");
+            return;
+        }
+        let mut shell = embedded_shell::shell::SubprocessShell::new();
+        // The dev host may or may not have a default route depending
+        // on network state; either result is valid.
+        let route = default_route(&mut shell).await.unwrap();
+        eprintln!("[test] default_route = {route:?}");
+        if let Some(r) = route {
+            assert_eq!(r.destination, "default");
+        }
     }
 }

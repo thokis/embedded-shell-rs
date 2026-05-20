@@ -149,6 +149,86 @@ pub async fn modem(shell: &mut dyn LinuxShell, index: u32) -> Result<Modem> {
     parse_modem(index, &stdout)
 }
 
+/// Details of the SIM card associated with a modem.
+///
+/// Returned by [`sim`]. mmcli's `--` "not available" placeholders are
+/// normalised to `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sim {
+    /// SIM index in mmcli's numbering.
+    pub index: u32,
+    /// ICCID (Integrated Circuit Card Identifier) — typically 19-20
+    /// digits, uniquely identifies the SIM card hardware.
+    pub iccid: Option<String>,
+    /// IMSI (International Mobile Subscriber Identity) — identifies
+    /// the subscriber on the network. Typically 15 digits.
+    pub imsi: Option<String>,
+    /// Mobile network operator's name as stored on the SIM
+    /// (e.g. "Telekom.de").
+    pub operator_name: Option<String>,
+    /// Mobile network operator's MCC+MNC code (e.g. "26201").
+    pub operator_code: Option<String>,
+}
+
+/// Returns SIM details for the modem at `modem_index`'s primary SIM.
+///
+/// Looks up the modem's `sim` path via `mmcli -m <index> -J`, then
+/// queries the SIM directly via `mmcli -i <sim_index> -J`. Two
+/// device-side calls per invocation.
+///
+/// # Errors
+///
+/// - [`Error::Shell`] if either mmcli call fails (no modem at that
+///   index, daemon not running, no SIM inserted, …).
+/// - [`Error::Parse`] if the JSON output isn't the expected shape.
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::modemmanager;
+///
+/// let sim = modemmanager::sim(&mut shell, 0).await?;
+/// println!("ICCID: {}", sim.iccid.as_deref().unwrap_or("?"));
+/// ```
+pub async fn sim(shell: &mut dyn LinuxShell, modem_index: u32) -> Result<Sim> {
+    // First call: find the SIM's D-Bus path.
+    let modem_json = run_mmcli(shell, &["-m", &modem_index.to_string(), "-J"]).await?;
+    let sim_path = extract_sim_path(&modem_json)?;
+    let sim_index = parse_index_from_path(&sim_path)?;
+
+    // Second call: query that SIM.
+    let sim_json = run_mmcli(shell, &["-i", &sim_index.to_string(), "-J"]).await?;
+    parse_sim(sim_index, &sim_json)
+}
+
+fn extract_sim_path(modem_json: &str) -> Result<String> {
+    let raw: RawModemRoot = serde_json::from_str(modem_json)
+        .map_err(|e| Error::Parse(format!("modem json: {e}; got {modem_json:?}")))?;
+    let path =
+        raw.modem.generic.sim.ok_or_else(|| {
+            Error::Parse("modem has no associated SIM (none inserted?)".to_string())
+        })?;
+    if path == "--" || path.is_empty() {
+        return Err(Error::Parse(
+            "modem has no associated SIM (none inserted?)".to_string(),
+        ));
+    }
+    Ok(path)
+}
+
+fn parse_sim(index: u32, json: &str) -> Result<Sim> {
+    let raw: RawSimRoot = serde_json::from_str(json)
+        .map_err(|e| Error::Parse(format!("mmcli -i -J: {e}; got {json:?}")))?;
+    let p = raw.sim.properties;
+    Ok(Sim {
+        index,
+        iccid: unbar(p.iccid),
+        imsi: unbar(p.imsi),
+        operator_name: unbar(p.operator_name),
+        operator_code: unbar(p.operator_code),
+    })
+}
+
 async fn run_mmcli(shell: &mut dyn LinuxShell, args: &[&str]) -> Result<String> {
     let mut cmd = Command::new("mmcli");
     for a in args {
@@ -241,6 +321,10 @@ struct RawModemGeneric {
     signal_quality: Option<RawSignalQuality>,
     #[serde(rename = "primary-port")]
     primary_port: Option<String>,
+    /// D-Bus path of the modem's primary SIM, e.g.
+    /// `/org/freedesktop/ModemManager1/SIM/0`. mmcli emits the
+    /// literal string `"--"` when no SIM is inserted.
+    sim: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -251,6 +335,26 @@ struct RawSignalQuality {
 #[derive(Deserialize)]
 struct RawModem3gpp {
     imei: Option<String>,
+    #[serde(rename = "operator-name")]
+    operator_name: Option<String>,
+    #[serde(rename = "operator-code")]
+    operator_code: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawSimRoot {
+    sim: RawSim,
+}
+
+#[derive(Deserialize)]
+struct RawSim {
+    properties: RawSimProperties,
+}
+
+#[derive(Deserialize)]
+struct RawSimProperties {
+    iccid: Option<String>,
+    imsi: Option<String>,
     #[serde(rename = "operator-name")]
     operator_name: Option<String>,
     #[serde(rename = "operator-code")]
@@ -394,6 +498,78 @@ mod tests {
     #[test]
     fn rejects_malformed_json() {
         let err = parse_modem(0, "not even json").unwrap_err();
+        assert!(matches!(err, Error::Parse(_)));
+    }
+
+    const SIM_JSON: &str = r#"{
+        "sim": {
+            "dbus-path": "/org/freedesktop/ModemManager1/SIM/0",
+            "properties": {
+                "iccid": "8949011234567890123",
+                "imsi": "262011234567890",
+                "operator-name": "Test Mobile",
+                "operator-code": "26201"
+            }
+        }
+    }"#;
+
+    const SIM_NO_IMSI_JSON: &str = r#"{
+        "sim": {
+            "properties": {
+                "iccid": "8949011234567890123",
+                "imsi": "--",
+                "operator-name": "--",
+                "operator-code": "--"
+            }
+        }
+    }"#;
+
+    const MODEM_WITH_SIM_PATH_JSON: &str = r#"{
+        "modem": {
+            "generic": {
+                "state": "registered",
+                "sim": "/org/freedesktop/ModemManager1/SIM/2"
+            }
+        }
+    }"#;
+
+    const MODEM_WITHOUT_SIM_JSON: &str = r#"{
+        "modem": {
+            "generic": {
+                "state": "disabled",
+                "sim": "--"
+            }
+        }
+    }"#;
+
+    #[test]
+    fn parses_sim_properties() {
+        let s = parse_sim(0, SIM_JSON).unwrap();
+        assert_eq!(s.index, 0);
+        assert_eq!(s.iccid.as_deref(), Some("8949011234567890123"));
+        assert_eq!(s.imsi.as_deref(), Some("262011234567890"));
+        assert_eq!(s.operator_name.as_deref(), Some("Test Mobile"));
+        assert_eq!(s.operator_code.as_deref(), Some("26201"));
+    }
+
+    #[test]
+    fn sim_double_dash_fields_become_none() {
+        let s = parse_sim(0, SIM_NO_IMSI_JSON).unwrap();
+        assert_eq!(s.iccid.as_deref(), Some("8949011234567890123"));
+        assert!(s.imsi.is_none());
+        assert!(s.operator_name.is_none());
+        assert!(s.operator_code.is_none());
+    }
+
+    #[test]
+    fn extracts_sim_path_from_modem_json() {
+        let path = extract_sim_path(MODEM_WITH_SIM_PATH_JSON).unwrap();
+        assert_eq!(path, "/org/freedesktop/ModemManager1/SIM/2");
+    }
+
+    #[test]
+    fn errors_when_modem_has_no_sim() {
+        let err = extract_sim_path(MODEM_WITHOUT_SIM_JSON).unwrap_err();
         assert!(matches!(err, Error::Parse(_)));
     }
 

@@ -151,6 +151,50 @@ pub async fn read_to_string(shell: &mut dyn LinuxShell, path: impl AsRef<Path>) 
     Ok(result.stdout().unwrap_or("").to_string())
 }
 
+/// Reads `path` and returns its raw bytes.
+///
+/// Analogue of [`std::fs::read`]. Unlike [`read_to_string`], handles
+/// non-UTF-8 content losslessly. Implementation: `base64 <path>` on
+/// the device, decoded on the host — same round-trip the transfer
+/// crate uses for its serial path.
+///
+/// Bounded by the transport's console-buffer cap (default 1 MiB).
+/// For larger files, use `embedded-shell-transfer`.
+///
+/// # Errors
+///
+/// - [`Error::Shell`] if `base64` exits non-zero (file missing,
+///   permission denied) or isn't installed on the device.
+/// - [`Error::Parse`] if the output isn't valid base64 (extremely
+///   unlikely; would indicate transport corruption or a
+///   non-coreutils `base64` implementation).
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::fs;
+///
+/// let bytes = fs::read(&mut shell, "/etc/some-binary-blob").await?;
+/// ```
+pub async fn read(shell: &mut dyn LinuxShell, path: impl AsRef<Path>) -> Result<Vec<u8>> {
+    let path = path_arg(path.as_ref());
+    // Direct invocation (not `base64 | tr` in a pipe) so the
+    // CommandFailed for a missing file bubbles up correctly — pipe
+    // exit codes default to the last stage, so `base64 missing |
+    // tr -d ...` exits 0 with empty stdout. Strip the embedded
+    // newlines host-side instead.
+    let r = shell.run(&Command::new("base64").arg(&path)).await?;
+    let encoded: String = r
+        .stdout()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    STANDARD
+        .decode(&encoded)
+        .map_err(|e| Error::Parse(format!("base64 decode of {path:?}: {e}")))
+}
+
 /// Lists the visible entries of directory `path` and returns their
 /// bare names (not full paths).
 ///
@@ -1069,6 +1113,43 @@ mod tests {
         assert!(matches!(err, Error::Shell(_)));
 
         let _ = std::fs::remove_file(&regular);
+    }
+
+    #[tokio::test]
+    async fn read_returns_raw_bytes_including_non_utf8() {
+        let mut shell = SubprocessShell::new();
+        let path = temp_path("read-binary");
+        // Bytes 0..=255 — read_to_string would mangle the non-UTF-8
+        // ones; read() must return them verbatim.
+        let original: Vec<u8> = (0..=255u8).collect();
+        std::fs::write(&path, &original).unwrap();
+
+        let got = read(&mut shell, &path).await.unwrap();
+        assert_eq!(got, original);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn read_round_trips_through_write() {
+        let mut shell = SubprocessShell::new();
+        let path = temp_path("read-write-roundtrip");
+        let payload: &[u8] = b"binary\x00with\xffnulls";
+
+        write(&mut shell, &path, payload).await.unwrap();
+        let got = read(&mut shell, &path).await.unwrap();
+        assert_eq!(got, payload);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn read_errors_on_missing_file() {
+        let mut shell = SubprocessShell::new();
+        let missing = temp_path("read-missing-xyz");
+        let _ = std::fs::remove_file(&missing);
+        let err = read(&mut shell, &missing).await.unwrap_err();
+        assert!(matches!(err, Error::Shell(_)));
     }
 
     #[tokio::test]

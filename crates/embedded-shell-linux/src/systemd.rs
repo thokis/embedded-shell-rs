@@ -28,6 +28,7 @@
 use std::time::Duration;
 
 use embedded_shell::shell::{Command, LinuxShell};
+use serde::Deserialize;
 
 use crate::error::{Error, Result};
 
@@ -263,6 +264,106 @@ pub async fn status(shell: &mut dyn LinuxShell, unit: &str) -> Result<UnitStatus
     parse_show_output(stdout)
 }
 
+/// Compact summary of one unit, as returned by [`list_units`].
+///
+/// Mirrors the five-column layout `systemctl list-units` prints —
+/// far less detail than the full [`UnitStatus`] returned by
+/// [`status`], but cheap to fetch in bulk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitListEntry {
+    /// Unit name (`sshd.service`, `network.target`, …).
+    pub unit: String,
+    /// Load state: `loaded`, `not-found`, `masked`, `error`.
+    pub load: String,
+    /// `active`, `inactive`, `failed`, `activating`, …
+    pub active: String,
+    /// More specific sub-state: `running`, `dead`, `exited`, …
+    pub sub: String,
+    /// One-line description.
+    pub description: String,
+}
+
+impl UnitListEntry {
+    /// `true` when [`active`][Self::active] is `"active"`.
+    pub fn is_active(&self) -> bool {
+        self.active == "active"
+    }
+    /// `true` when the unit is active *and* its sub-state is
+    /// `"running"`.
+    pub fn is_running(&self) -> bool {
+        self.is_active() && self.sub == "running"
+    }
+}
+
+/// Lists units systemd currently knows about.
+///
+/// Equivalent to `systemctl list-units -o json --no-pager`. Pass a
+/// glob `pattern` to restrict the listing (`Some("sshd*")`,
+/// `Some("*.service")`); pass `None` for everything systemd currently
+/// has loaded.
+///
+/// By default `systemctl list-units` only shows units that are
+/// active, have pending jobs, or have failed — the same filter
+/// applies here. To see every loaded unit, use
+/// `systemctl list-units --all` via a raw `shell.run` call (v1
+/// doesn't expose `--all` directly).
+///
+/// # Errors
+///
+/// - [`Error::Shell`] if `systemctl` isn't installed.
+/// - [`Error::Parse`] if the JSON output isn't the expected shape.
+///
+/// # Example
+///
+/// ```ignore
+/// use embedded_shell_linux::systemd;
+///
+/// let services: Vec<_> = systemd::list_units(&mut shell, Some("*.service"))
+///     .await?
+///     .into_iter()
+///     .filter(|u| !u.is_active())
+///     .collect();
+/// for u in services {
+///     println!("{}: {} ({})", u.unit, u.active, u.sub);
+/// }
+/// ```
+pub async fn list_units(
+    shell: &mut dyn LinuxShell,
+    pattern: Option<&str>,
+) -> Result<Vec<UnitListEntry>> {
+    let mut args = vec!["list-units", "-o", "json", "--no-pager"];
+    if let Some(p) = pattern {
+        args.push(p);
+    }
+    let result = shell.run(&systemctl(&args)).await?;
+    let stdout = result.stdout().unwrap_or("");
+    parse_list_units_output(stdout)
+}
+
+fn parse_list_units_output(stdout: &str) -> Result<Vec<UnitListEntry>> {
+    let raw: Vec<RawUnitListEntry> = serde_json::from_str(stdout)
+        .map_err(|e| Error::Parse(format!("systemctl list-units json: {e}; got {stdout:?}")))?;
+    Ok(raw
+        .into_iter()
+        .map(|r| UnitListEntry {
+            unit: r.unit,
+            load: r.load,
+            active: r.active,
+            sub: r.sub,
+            description: r.description,
+        })
+        .collect())
+}
+
+#[derive(Deserialize)]
+struct RawUnitListEntry {
+    unit: String,
+    load: String,
+    active: String,
+    sub: String,
+    description: String,
+}
+
 /// Builds the base `systemctl` command. `--no-pager` keeps `show` /
 /// `status` from blocking on a pager that doesn't exist in
 /// non-interactive sessions.
@@ -390,6 +491,57 @@ Description=One-shot job that's done
     fn rejects_output_missing_required_fields() {
         let err = parse_show_output("ActiveState=active\n").unwrap_err();
         assert!(matches!(err, Error::Parse(_)));
+    }
+
+    const LIST_UNITS_JSON: &str = r#"[
+        {"unit":"sshd.service","load":"loaded","active":"active","sub":"running","description":"OpenSSH server daemon","job":"-"},
+        {"unit":"foo.service","load":"loaded","active":"failed","sub":"failed","description":"A broken thing"},
+        {"unit":"basic.target","load":"loaded","active":"active","sub":"active","description":"Basic System"}
+    ]"#;
+
+    #[test]
+    fn parses_list_units_output() {
+        let entries = parse_list_units_output(LIST_UNITS_JSON).unwrap();
+        assert_eq!(entries.len(), 3);
+
+        assert_eq!(entries[0].unit, "sshd.service");
+        assert!(entries[0].is_running());
+        assert!(entries[0].is_active());
+
+        assert_eq!(entries[1].active, "failed");
+        assert!(!entries[1].is_active());
+        assert!(!entries[1].is_running());
+
+        // A target: active but not "running" (its sub is "active").
+        assert!(entries[2].is_active());
+        assert!(!entries[2].is_running());
+    }
+
+    #[test]
+    fn parses_empty_list_units_output() {
+        let entries = parse_list_units_output("[]").unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn rejects_malformed_list_units_output() {
+        let err = parse_list_units_output("not json").unwrap_err();
+        assert!(matches!(err, Error::Parse(_)));
+    }
+
+    #[tokio::test]
+    async fn list_units_against_host_systemd() {
+        if !host_has_systemctl() || !host_running_systemd() {
+            eprintln!("skipping: host doesn't have a running systemd");
+            return;
+        }
+        let mut shell = embedded_shell::shell::SubprocessShell::new();
+        // Restrict to .service units so we don't enumerate hundreds.
+        let units = list_units(&mut shell, Some("*.service")).await.unwrap();
+        eprintln!("[test] {} services on host", units.len());
+        // A systemd host running tests should have at least one active
+        // service (the test runner's parent shell, init.scope, etc.).
+        assert!(units.iter().any(|u| u.is_active()));
     }
 
     fn host_has_systemctl() -> bool {
