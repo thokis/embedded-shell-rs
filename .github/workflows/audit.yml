@@ -1,0 +1,48 @@
+name: Security audit
+
+# Runs `cargo audit` against the workspace lock file. Separate from the
+# main CI workflow so newly-published RustSec advisories don't break
+# unrelated PRs — security findings land as annotations on PRs that
+# touch Cargo files, and as issues on the default branch on the
+# scheduled run.
+
+on:
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/audit.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/audit.yml"
+  schedule:
+    # Monday 06:00 UTC — runs before Dependabot's Monday scan so if a
+    # weekend advisory landed, the issue is already open by the time
+    # any Dependabot PR arrives.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+  checks: write
+
+# Cancel in-progress runs on the same ref so a rapid push sequence
+# doesn't queue up duplicates.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: cargo-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rustsec/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
