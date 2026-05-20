@@ -227,7 +227,7 @@ embedded-shell-rs/                    ← workspace root
   wrappers (`printenv`, `setenv`, `tftpboot`, `loady`/`loadb`) behind a
   `UBootShell` marker trait, mirroring the `LinuxShell` pattern.
 - **CLI output polish across remaining commands.** `info`, `services`,
-  and `journal` have polished output; `network` and `modem` still need
+  `journal`, and `network` have polished output; `modem` still needs
   similar treatment (parsed values, structured JSON, TTY-aware
   coloring).
 - **REPL polish bundle.** `\cd <dir>` for stateful per-session cwd,
